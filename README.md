@@ -1,8 +1,8 @@
 # Full Keep Mode for Obsidian
 
 An [Obsidian](https://obsidian.md) plugin that brings the Google Keep
-experience to Obsidian: a board of coloured cards, pinned notes, quick notes,
-and checklists that tidy themselves up the way Keep's do.
+experience to Obsidian: a board of coloured cards, pinned and archived notes,
+reminders, quick notes, and checklists that tidy themselves up the way Keep's do.
 
 ![Ticking items, a ghost parent, dragging and indenting](docs/demo.gif)
 
@@ -12,6 +12,13 @@ and checklists that tidy themselves up the way Keep's do.
 
 - **Pin and colour buttons** in every note's top bar, in tabs and in the
   board's pop-up. Pinned notes come first on the board.
+- **Archive** a note from its top bar, with "Undo" in the confirmation, like in
+  Keep. Archived notes leave the board and show up in its Archive view. Notes
+  tagged `#archived` (as imported from Keep) count as archived too.
+- **Reminders.** The bell in a note's top bar offers Keep's choices (later
+  today, tomorrow, next week) or any date and time. When a reminder is due, a
+  notice pops up in Obsidian, plus a system notification on desktop. Reminders
+  that fell due while Obsidian was closed are shown when you open it.
 - **"Take a note…"** at the top of the board opens a new note in a pop-up, title
   ready to type. Close it without writing anything and it's thrown away, like in
   Keep.
@@ -19,12 +26,13 @@ and checklists that tidy themselves up the way Keep's do.
   it on a phone or tablet. A dragged card takes the place of the card you drop
   it on.
 - **"Create a Keep board"** sets up a ready-made board: newest notes first,
-  pinned ones on top, archived notes (`#archived`) left out.
+  pinned ones on top, archived notes in a separate Archive view.
 
 The board itself is drawn by the
 [Keep Bases View](https://github.com/k4fn/keep-bases-view) plugin;
 Full Keep Mode adds the rest. Both use the same note properties, `keep_pinned`
-and `keep_color`. A note's place on the board is stored in `keep_order`.
+and `keep_color`. A note's place on the board is stored in `keep_order`, its
+archived state in `keep_archived` and its reminder in `keep_reminder`.
 
 ### Checklists
 
@@ -74,6 +82,8 @@ The checklist features work in any note, with or without the board.
 |---|---|
 | Pin button | on |
 | Colour button | on |
+| Archive button | on |
+| Reminders | on |
 | "Take a note…" bar | on |
 | Drag cards | on |
 | Move ticked items down | on |
@@ -106,7 +116,9 @@ Manually: download `main.js`, `manifest.json` and `styles.css` from the
   view.
 - On phones, Obsidian's own indent button in the toolbar isn't limited to two
   levels; Tab and dragging are.
-- Not yet: reminders, labels on the board, archiving from a note.
+- Reminders pop up only while Obsidian is running (missed ones are shown when
+  it opens). Obsidian can't wake a phone the way Keep's reminders do.
+- Not yet: labels on the board.
 
 ## Development
 
@@ -114,7 +126,7 @@ There's no build step: `main.js` is the plugin as it ships.
 
 The tests in `tests/live_test.py` run against a real Obsidian. They create
 temporary notes and a temporary board, tick, drag with real mouse events, press
-Tab, pin, colour and take notes, and check the results:
+Tab, pin, colour, archive, set reminders and take notes, and check the results:
 
 ```bash
 # Start Obsidian with its debugging port (close it first). Windows:

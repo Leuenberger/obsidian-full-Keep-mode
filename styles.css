@@ -7,6 +7,53 @@
 	color: var(--interactive-accent);
 }
 
+/* A note with a reminder: the bell in the accent colour. */
+.fkm-reminder-button.has-reminder {
+	color: var(--interactive-accent);
+}
+
+/* The bell's pop-up: Keep-style quick picks, then a date and time field. */
+.fkm-reminder-modal {
+	width: min(360px, 92vw);
+}
+
+.fkm-reminder-picks {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 12px;
+}
+
+button.fkm-reminder-pick {
+	display: flex;
+	justify-content: space-between;
+	width: 100%;
+	box-shadow: none;
+	background: transparent;
+}
+
+button.fkm-reminder-pick:hover {
+	background: var(--background-modifier-hover);
+}
+
+.fkm-reminder-pick-time {
+	color: var(--text-muted);
+}
+
+.fkm-reminder-custom {
+	display: flex;
+	gap: 8px;
+}
+
+.fkm-reminder-custom input {
+	flex: 1;
+}
+
+button.fkm-reminder-remove {
+	width: 100%;
+	margin-top: 12px;
+}
+
 /* Colour menu: a filled dot per colour. */
 .fkm-color-swatch svg {
 	fill: var(--fkm-swatch, transparent);

@@ -327,8 +327,13 @@ def main():
 
         print("Board (Keep Bases View)")
         has_board = ob.js("return !!app.plugins.plugins['keep-bases-view'];")
+        hidden = ob.js("return document.visibilityState === 'hidden';")
         if not has_board:
             print("  skipped: the Keep Bases View plugin isn't enabled")
+        elif hidden:
+            # A hidden window (minimised, covered, screen off) doesn't draw, so the board
+            # never lays out its cards and mouse drags stall.
+            print("  skipped: the Obsidian window is hidden; keep it visible to test the board")
         else:
             open_board({"Card A": 300, "Card B": 200, "Card C": 100})
             bar = ob.js("""const el = window.__fkmBoard.view.containerEl;
@@ -386,6 +391,55 @@ def main():
             ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(path)}); if (f) await app.vault.trash(f, true);")
             ob.js("window.__fkmBoard.detach();")
 
+        print("Archive and reminders")
+        # An imported archived note: Keep Importer writes the tag on a line of its own.
+        open_note("archive", "Some text\n\n #archived\n\nmore")
+        labels = ob.js("return [...window.__tcLeaf.view.containerEl.querySelectorAll('.view-actions .clickable-icon')].map(b => b.getAttribute('aria-label'));")
+        order = [l for l in labels if l in ("Undo", "Redo", "Pin", "Unpin", "Remind me", "Colour", "Archive", "Unarchive")]
+        check("top bar: Undo, Redo, Pin, Remind me, Colour, Archive (the tag counts as archived)",
+              order == ["Undo", "Redo", "Pin", "Remind me", "Colour", "Unarchive"], labels)
+        click_archive = PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-archive-button').click(); await wait(700);"
+        ob.js(click_archive)
+        check("unarchiving removes the #archived line", text() == "Some text\n\n\nmore", repr(text()))
+        ob.js(click_archive)
+        check("archiving sets keep_archived", frontmatter("archive").get("keep_archived") is True, frontmatter("archive"))
+        undo_link = ob.js(PRELUDE + """
+            const a = [...document.querySelectorAll('.notice a')].filter(a => a.textContent === 'Undo').pop();
+            if (!a) return false; a.click(); await wait(700); return true;""")
+        check("…and \"Undo\" in the notice unarchives it", undo_link and "keep_archived" not in frontmatter("archive"), frontmatter("archive"))
+
+        ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').click(); await wait(400);")
+        picks = ob.js("return [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick span:first-child')].map(s => s.textContent);")
+        check("the bell opens Keep's quick picks", "Tomorrow" in picks and "Next week" in picks, picks)
+        ob.js(PRELUDE + """
+            [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick')].find(b => b.textContent.startsWith('Tomorrow')).click();
+            await wait(700);""")
+        tomorrow = ob.js("return moment().add(1, 'day').format('YYYY-MM-DD') + 'T08:00';")
+        check("\"Tomorrow\" sets the reminder to 8:00 tomorrow", frontmatter("archive").get("keep_reminder") == tomorrow, frontmatter("archive"))
+        check("…and the bell shows it", ob.js("return window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').classList.contains('has-reminder');"))
+
+        fired = ob.js(PRELUDE + """
+            const plugin = app.plugins.plugins["full-keep-mode"];
+            const shown = [];
+            const RealNotification = window.Notification;
+            window.Notification = class { constructor(title, o) { shown.push(title + ': ' + o.body); } static permission = 'granted'; };
+            try {
+                const f = app.vault.getAbstractFileByPath(FOLDER + '/archive.md');
+                await app.fileManager.processFrontMatter(f, fm => { fm.keep_reminder = moment().subtract(1, 'minute').format('YYYY-MM-DDTHH:mm'); });
+                await wait(500);
+                delete plugin.settings.firedReminders[f.path];
+                const notices = () => [...document.querySelectorAll('.notice')].filter(n => n.textContent.includes('Reminder') && n.textContent.includes('archive')).length;
+                const before = notices();
+                await plugin.checkReminders();
+                const first = notices() - before;
+                await plugin.checkReminders();
+                const second = notices() - before;
+                document.querySelectorAll('.notice').forEach(n => { if (n.textContent.includes('archive')) n.remove(); });
+                await plugin.setReminder(f, null);
+                return { first, second, shown };
+            } finally { window.Notification = RealNotification; }""")
+        check("a due reminder pops up once, with a system notification", fired["first"] == 1 and fired["second"] == 1 and fired["shown"] == ["Reminder: archive"], fired)
+
         print("Command and header buttons")
         open_note("command", HEAD + "- [x] A\n- [ ] B\n- [x] C\n- [ ] D")
         ob.js(PRELUDE + "app.commands.executeCommandById('full-keep-mode:sort-ticked-items'); await wait(500);")
@@ -401,7 +455,12 @@ def main():
         if (window.__tcSaved) { Object.assign(plugin.settings, JSON.parse(window.__tcSaved)); delete window.__tcSaved; plugin.refreshEditors(); }
         for (const l of app.workspace.getLeavesOfType("markdown")) if (l.view.file?.path?.startsWith(FOLDER + "/")) l.detach();
         const folder = app.vault.getAbstractFileByPath(FOLDER);
-        if (folder) await app.vault.trash(folder, true);
+        // Trash the notes one by one first: Bases misses notes trashed along with their folder
+        // and would keep showing them on the board.
+        if (folder) {
+            for (const f of [...folder.children]) await app.vault.trash(f, true);
+            await app.vault.trash(folder, true);
+        }
         document.querySelectorAll(".modal-container[data-tc-hidden]").forEach(m => { m.style.visibility = ""; delete m.dataset.tcHidden; });
         """)
 

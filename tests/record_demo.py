@@ -95,7 +95,10 @@ finally:
     lt.ob.js(lt.PRELUDE + """
     for (const l of app.workspace.getLeavesOfType("markdown")) if (l.view.file?.path?.startsWith(FOLDER + "/")) l.detach();
     const folder = app.vault.getAbstractFileByPath(FOLDER);
-    if (folder) await app.vault.trash(folder, true);
+    if (folder) {
+        for (const f of [...folder.children]) await app.vault.trash(f, true);
+        await app.vault.trash(folder, true);
+    }
     document.querySelectorAll(".modal-container[data-tc-hidden]").forEach(m => { m.style.visibility = ""; delete m.dataset.tcHidden; });
     """)
 

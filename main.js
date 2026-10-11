@@ -38,8 +38,11 @@ const DEFAULT_SETTINGS = {
 	// notes and board
 	pinButton: true,
 	colorButton: true,
+	archiveButton: true,
+	reminders: true,
 	takeANote: true,
 	dragCards: true,
+	firedReminders: {}, // path -> reminder time already shown (so each one fires once)
 };
 
 // A note can opt out of the checklist features with this property set to false.
@@ -49,6 +52,9 @@ const OPT_OUT_PROPERTY = "full-keep-mode";
 const PIN_PROPERTY = "keep_pinned";
 const COLOR_PROPERTY = "keep_color";
 const ORDER_PROPERTY = "keep_order"; // position on the board; higher = further up
+const ARCHIVE_PROPERTY = "keep_archived"; // true = archived (the tag #archived counts too)
+const REMINDER_PROPERTY = "keep_reminder"; // local date and time, "YYYY-MM-DDTHH:mm"
+const ARCHIVE_TAG = "archived";
 const KEEP_VIEW_PLUGIN = "keep-bases-view";
 const COLORS = [
 	{ id: null, name: "Default" },
@@ -64,23 +70,39 @@ const COLORS = [
 
 // The board the "Create a Keep board" command sets up. Newest notes come first;
 // a note dragged to a new place gets a keep_order between its neighbours'.
+// A second view shows the archive.
 const BOARD_BASE = `filters:
   and:
     - 'file.ext == "md"'
-    - not:
-        - file.hasTag("archived")
 formulas:
   board_order: 'if(${ORDER_PROPERTY}, ${ORDER_PROPERTY}, number(file.ctime))'
 views:
   - type: keep-grid-view
     name: Board
+    filters:
+      not:
+        - file.hasTag("${ARCHIVE_TAG}")
+        - '${ARCHIVE_PROPERTY} == true'
     order:
       - file.name
       - file.tags
+      - note.${REMINDER_PROPERTY}
     sort:
       - property: ${PIN_PROPERTY}
         direction: DESC
       - property: formula.board_order
+        direction: DESC
+  - type: keep-grid-view
+    name: Archive
+    filters:
+      or:
+        - file.hasTag("${ARCHIVE_TAG}")
+        - '${ARCHIVE_PROPERTY} == true'
+    order:
+      - file.name
+      - file.tags
+    sort:
+      - property: file.mtime
         direction: DESC
 `;
 const INDENT_STEP = 28; // px of sideways drag per indent level
@@ -638,6 +660,8 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 		}
 		toggle("Pin button", "A pin in each note's top bar. Pinned notes are shown first on the board.", "pinButton");
 		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
+		toggle("Archive button", `A button in each note's top bar that archives the note (property "${ARCHIVE_PROPERTY}"), with Undo. The board hides archived notes; they are in its Archive view.`, "archiveButton");
+		toggle("Reminders", `A bell in each note's top bar to set a reminder (property "${REMINDER_PROPERTY}"). When it is due, a notice pops up while Obsidian is open; reminders missed while it was closed are shown when it opens.`, "reminders");
 		toggle("\"Take a note…\" bar", "On the board: opens a new note in the pop-up. A new note closed without any text is thrown away, like in Keep.", "takeANote");
 		toggle("Drag cards", "Drag cards on the board to reorder them. On a phone: hold a card, then drag it.", "dragCards");
 
@@ -677,6 +701,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		await this.loadSettings();
 		this.headerButtons = new Set();
 		this.pinButtons = new Map(); // MarkdownView -> its pin button
+		this.archiveButtons = new Map();
+		this.reminderButtons = new Map();
 		this.boardListeners = []; // functions that remove the board listeners
 		this.registerEditorExtension(checklistExtension(this));
 		this.addSettingTab(new FullKeepModeSettingTab(this.app, this));
@@ -697,13 +723,15 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			callback: () => this.createBoard(),
 		});
 
-		// Keep the pin icons in step when a note is pinned elsewhere (e.g. on the board).
-		this.registerEvent(this.app.metadataCache.on("changed", file => {
-			for (const [view, button] of this.pinButtons) if (view.file === file) this.renderPin(view, button);
-		}));
-		this.registerEvent(this.app.workspace.on("file-open", () => {
-			for (const [view, button] of this.pinButtons) this.renderPin(view, button);
-		}));
+		// Keep the top-bar icons in step when a note is changed elsewhere (e.g. on the board).
+		this.registerEvent(this.app.metadataCache.on("changed", file => this.renderButtons(file)));
+		this.registerEvent(this.app.workspace.on("file-open", () => this.renderButtons()));
+
+		// Reminders: check now (catching up on missed ones) and every 20 seconds.
+		this.app.workspace.onLayoutReady(() => {
+			void this.checkReminders(true);
+			this.registerInterval(window.setInterval(() => void this.checkReminders(), 20000));
+		});
 
 		// Add the "Take a note…" bar and card dragging whenever a Keep board appears
 		// or redraws its cards.
@@ -726,6 +754,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.headerButtons.forEach(button => button.remove());
 		this.headerButtons.clear();
 		this.pinButtons.clear();
+		this.archiveButtons.clear();
+		this.reminderButtons.clear();
 		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
 		this.boardObserver?.disconnect();
 		this.boardListeners.forEach(remove => remove());
@@ -734,7 +764,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = await this.loadData();
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+		this.settings.firedReminders = Object.assign({}, data?.firedReminders);
 	}
 
 	async saveSettings() {
@@ -766,11 +798,28 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		view.fullKeepModeButtons = true;
 		const s = this.settings;
 		const added = [];
-		// addAction puts each new button in front, so add them right to left.
+		// addAction puts each new button in front, so add them right to left:
+		// undo, redo, pin, reminder, colour, archive.
+		if (s.archiveButton) {
+			const archive = view.addAction("archive", "Archive", () => this.toggleArchive(view));
+			archive.addClass("fkm-archive-button");
+			this.archiveButtons.set(view, archive);
+			this.renderArchive(view, archive);
+			added.push(archive);
+		}
 		if (s.colorButton) {
 			const color = view.addAction("palette", "Colour", event => this.showColorMenu(view, event));
 			color.addClass("fkm-color-button");
 			added.push(color);
+		}
+		if (s.reminders) {
+			const bell = view.addAction("bell", "Remind me", () => {
+				if (view.file) new ReminderModal(this, view.file).open();
+			});
+			bell.addClass("fkm-reminder-button");
+			this.reminderButtons.set(view, bell);
+			this.renderReminder(view, bell);
+			added.push(bell);
 		}
 		if (s.pinButton) {
 			const pin = view.addAction("pin", "Pin", () => this.togglePin(view));
@@ -790,8 +839,142 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		view.register(() => {
 			added.forEach(button => this.headerButtons.delete(button));
 			this.pinButtons.delete(view);
+			this.archiveButtons.delete(view);
+			this.reminderButtons.delete(view);
 			delete view.fullKeepModeButtons;
 		});
+	}
+
+	// Bring all top-bar buttons of views showing `file` (or all views) up to date.
+	renderButtons(file = null) {
+		for (const [view, button] of this.pinButtons) if (!file || view.file === file) this.renderPin(view, button);
+		for (const [view, button] of this.archiveButtons) if (!file || view.file === file) this.renderArchive(view, button);
+		for (const [view, button] of this.reminderButtons) if (!file || view.file === file) this.renderReminder(view, button);
+	}
+
+	// ----- archive --------------------------------------------------------------------------
+
+	isArchived(file) {
+		if (!file) return false;
+		const value = this.frontmatterOf(file)[ARCHIVE_PROPERTY];
+		if (value === true || value === "true") return true;
+		const tags = obsidian.getAllTags(this.app.metadataCache.getFileCache(file) ?? {}) ?? [];
+		return tags.some(tag => tag.toLowerCase() === `#${ARCHIVE_TAG}`);
+	}
+
+	renderArchive(view, button) {
+		const archived = this.isArchived(view.file);
+		button.toggleClass("is-archived", archived);
+		button.setAttribute("aria-label", archived ? "Unarchive" : "Archive");
+		obsidian.setIcon(button, archived ? "archive-restore" : "archive");
+	}
+
+	// Like Keep: archive or unarchive, with "Undo" in the confirmation.
+	async toggleArchive(view) {
+		const file = view.file;
+		if (!file || file.extension !== "md") return;
+		const archive = !this.isArchived(file);
+		await this.setArchived(file, archive);
+		const fragment = createFragment(f => {
+			f.appendText(archive ? "Note archived. " : "Note unarchived. ");
+			const undo = f.createEl("a", { text: "Undo", href: "#" });
+			undo.addEventListener("click", event => {
+				event.preventDefault();
+				void this.setArchived(file, !archive);
+			});
+		});
+		new obsidian.Notice(fragment, 6000);
+	}
+
+	async setArchived(file, archive) {
+		if (archive) {
+			await this.app.fileManager.processFrontMatter(file, fm => {
+				fm[ARCHIVE_PROPERTY] = true;
+			});
+			return;
+		}
+		await this.app.fileManager.processFrontMatter(file, fm => {
+			delete fm[ARCHIVE_PROPERTY];
+			if (Array.isArray(fm.tags)) {
+				fm.tags = fm.tags.filter(tag => String(tag).replace(/^#/, "").toLowerCase() !== ARCHIVE_TAG);
+				if (!fm.tags.length) delete fm.tags;
+			}
+		});
+		// The tag may also be written in the note itself (e.g. by an import): remove it there too.
+		// A line that held only the tag goes away.
+		const tag = new RegExp(`(^|[ \\t])#${ARCHIVE_TAG}(?=\\s|$)`, "gi");
+		await this.app.vault.process(file, text => text.split("\n").flatMap(line => {
+			if (!line.match(tag)) return [line];
+			const rest = line.replace(tag, "$1").trimEnd();
+			return rest.trim() ? [rest] : [];
+		}).join("\n"));
+	}
+
+	// ----- reminders --------------------------------------------------------------------------
+
+	reminderOf(file) {
+		const value = this.frontmatterOf(file)[REMINDER_PROPERTY];
+		if (!value) return null;
+		const time = obsidian.moment(String(value));
+		return time.isValid() ? time : null;
+	}
+
+	renderReminder(view, button) {
+		const time = this.reminderOf(view.file);
+		button.toggleClass("has-reminder", !!time);
+		button.setAttribute("aria-label", time ? `Reminder: ${time.format("ddd D MMM, HH:mm")}` : "Remind me");
+		obsidian.setIcon(button, time ? "bell-ring" : "bell");
+	}
+
+	async setReminder(file, time) {
+		await this.app.fileManager.processFrontMatter(file, fm => {
+			if (time) fm[REMINDER_PROPERTY] = time.format("YYYY-MM-DDTHH:mm");
+			else delete fm[REMINDER_PROPERTY];
+		});
+		// A changed reminder may fire again.
+		delete this.settings.firedReminders[file.path];
+		await this.saveData(this.settings);
+	}
+
+	// Show every reminder that is due and hasn't been shown yet. Called every
+	// 20 seconds while Obsidian runs, and once at start (catching up on any that
+	// fell due while Obsidian was closed).
+	async checkReminders(atStart = false) {
+		if (!this.settings.reminders) return;
+		const now = obsidian.moment();
+		const fired = this.settings.firedReminders;
+		const due = [];
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const time = this.reminderOf(file);
+			if (!time || time.isAfter(now)) continue;
+			const key = time.format("YYYY-MM-DDTHH:mm");
+			if (fired[file.path] === key) continue;
+			fired[file.path] = key;
+			due.push({ file, time });
+		}
+		if (!due.length) return;
+		await this.saveData(this.settings);
+		for (const { file, time } of due) this.showReminder(file, time, atStart || now.diff(time, "minutes") > 2);
+	}
+
+	showReminder(file, time, missed) {
+		const title = file.basename;
+		const fragment = createFragment(f => {
+			f.createEl("b", { text: missed ? "Missed reminder" : "Reminder" });
+			f.appendText(` (${time.format("ddd D MMM, HH:mm")}): ${title} `);
+			const open = f.createEl("a", { text: "Open", href: "#" });
+			open.addEventListener("click", event => {
+				event.preventDefault();
+				void this.app.workspace.getLeaf(false).openFile(file);
+			});
+		});
+		new obsidian.Notice(fragment, 0); // stays until clicked away, like a Keep reminder
+		// A system notification too, on desktop (also when Obsidian is in the background).
+		if (!obsidian.Platform.isMobile && typeof Notification !== "undefined") {
+			const show = () => new Notification(missed ? "Missed reminder" : "Reminder", { body: title });
+			if (Notification.permission === "granted") show();
+			else if (Notification.permission !== "denied") void Notification.requestPermission().then(p => p === "granted" && show());
+		}
 	}
 
 	// ----- pin and colour -----------------------------------------------------------------
@@ -1259,5 +1442,59 @@ class NewNoteModal extends obsidian.Modal {
 			const text = await this.app.vault.read(file);
 			if (text.trim() === "") await this.app.fileManager.trashFile(file);
 		}
+	}
+}
+
+// The bell's pop-up: quick picks like Keep's, a date and time field, and "Remove".
+class ReminderModal extends obsidian.Modal {
+	constructor(plugin, file) {
+		super(plugin.app);
+		this.plugin = plugin;
+		this.file = file;
+	}
+
+	onOpen() {
+		const { contentEl, plugin, file } = this;
+		this.modalEl.addClass("fkm-reminder-modal");
+		this.titleEl.setText("Remind me");
+		const current = plugin.reminderOf(file);
+		const now = obsidian.moment();
+		const set = async time => {
+			await plugin.setReminder(file, time);
+			this.close();
+			new obsidian.Notice(time ? `Reminder set: ${time.format("ddd D MMM, HH:mm")}` : "Reminder removed");
+		};
+
+		const later = now.clone().hour(20).minute(0).second(0); // Keep: 8 PM
+		const picks = [
+			now.hour() < 19 ? ["Later today", later] : null,
+			["Tomorrow", now.clone().add(1, "day").hour(8).minute(0).second(0)],
+			["Next week", now.clone().add(1, "week").startOf("isoWeek").hour(8).minute(0).second(0)],
+		].filter(Boolean);
+		const list = contentEl.createDiv({ cls: "fkm-reminder-picks" });
+		for (const [label, time] of picks) {
+			const row = list.createEl("button", { cls: "fkm-reminder-pick" });
+			row.createSpan({ text: label });
+			row.createSpan({ cls: "fkm-reminder-pick-time", text: time.format("ddd HH:mm") });
+			row.addEventListener("click", () => void set(time));
+		}
+
+		const custom = contentEl.createDiv({ cls: "fkm-reminder-custom" });
+		const input = custom.createEl("input", { type: "datetime-local" });
+		input.value = (current ?? now.clone().add(1, "hour").startOf("hour")).format("YYYY-MM-DDTHH:mm");
+		const save = custom.createEl("button", { cls: "mod-cta", text: "Save" });
+		save.addEventListener("click", () => {
+			const time = obsidian.moment(input.value, "YYYY-MM-DDTHH:mm", true);
+			if (time.isValid()) void set(time);
+		});
+
+		if (current) {
+			const remove = contentEl.createEl("button", { cls: "fkm-reminder-remove mod-warning", text: "Remove reminder" });
+			remove.addEventListener("click", () => void set(null));
+		}
+	}
+
+	onClose() {
+		this.contentEl.empty();
 	}
 }
