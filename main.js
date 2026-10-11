@@ -1,7 +1,14 @@
 /*
- * Full Keep Mode - the Google Keep experience in Obsidian. This part: checklists
- * that behave like Google Keep's.
+ * Full Keep Mode - the Google Keep experience in Obsidian.
  *
+ * Notes and the board (with the Keep Bases View plugin, which draws the cards):
+ *  - Pin and colour buttons in every note's top bar (also in the Keep pop-up).
+ *  - A "Take a note…" bar on the board; the new note opens in the Keep pop-up and
+ *    is thrown away if it's closed untouched.
+ *  - Drag cards to reorder them - with the mouse, or hold and drag on a phone.
+ *  - A command that sets up a ready-made Keep board.
+ *
+ * Checklists that behave like Google Keep's:
  *  - Ticked items drop below a "N ticked items" divider; unticking moves them back.
  *  - A ticked sub-item of an unticked item is shown in the ticked section under a
  *    faded "ghost" copy of its parent (the note itself keeps it under the parent).
@@ -28,10 +35,54 @@ const DEFAULT_SETTINGS = {
 	maxIndent: 1, // levels of indentation below the top level (1 = like Keep, 0 = unlimited)
 	alignExtraLines: true,
 	undoButtons: true,
+	// notes and board
+	pinButton: true,
+	colorButton: true,
+	takeANote: true,
+	dragCards: true,
 };
 
-// A note can opt out with this property set to false.
+// A note can opt out of the checklist features with this property set to false.
 const OPT_OUT_PROPERTY = "full-keep-mode";
+
+// Note properties, shared with the Keep Bases View plugin (which draws the board).
+const PIN_PROPERTY = "keep_pinned";
+const COLOR_PROPERTY = "keep_color";
+const ORDER_PROPERTY = "keep_order"; // position on the board; higher = further up
+const KEEP_VIEW_PLUGIN = "keep-bases-view";
+const COLORS = [
+	{ id: null, name: "Default" },
+	{ id: "red", name: "Red", hex: "#f28b82" },
+	{ id: "orange", name: "Orange", hex: "#fbbc04" },
+	{ id: "yellow", name: "Yellow", hex: "#fff475" },
+	{ id: "green", name: "Green", hex: "#ccff90" },
+	{ id: "cyan", name: "Teal", hex: "#a8f0e0" },
+	{ id: "blue", name: "Blue", hex: "#aecbfa" },
+	{ id: "purple", name: "Purple", hex: "#d7aefb" },
+	{ id: "pink", name: "Pink", hex: "#fdcfe8" },
+];
+
+// The board the "Create a Keep board" command sets up. Newest notes come first;
+// a note dragged to a new place gets a keep_order between its neighbours'.
+const BOARD_BASE = `filters:
+  and:
+    - 'file.ext == "md"'
+    - not:
+        - file.hasTag("archived")
+formulas:
+  board_order: 'if(${ORDER_PROPERTY}, ${ORDER_PROPERTY}, number(file.ctime))'
+views:
+  - type: keep-grid-view
+    name: Board
+    order:
+      - file.name
+      - file.tags
+    sort:
+      - property: ${PIN_PROPERTY}
+        direction: DESC
+      - property: formula.board_order
+        direction: DESC
+`;
 const INDENT_STEP = 28; // px of sideways drag per indent level
 const MAX_STYLED_DEPTH = 5; // indent levels with alignment styles (deeper ones use level 5's)
 
@@ -211,7 +262,7 @@ function checklistExtension(plugin) {
 		}
 		toDOM(view) {
 			// No aria-label: Obsidian would show it as a tooltip right over the list while dragging.
-			const el = createSpan({ cls: "tc-grip" });
+			const el = createSpan({ cls: "fkm-grip" });
 			obsidian.setIcon(el, "grip-vertical");
 			el.addEventListener("pointerdown", event => plugin.startItemDrag(view, el, event));
 			return el;
@@ -232,7 +283,7 @@ function checklistExtension(plugin) {
 			return other.depth === this.depth;
 		}
 		toDOM() {
-			return createSpan({ cls: `tc-extra-spacer tc-depth-${this.depth}` });
+			return createSpan({ cls: `fkm-extra-spacer fkm-depth-${this.depth}` });
 		}
 		ignoreEvent() {
 			return false;
@@ -251,15 +302,15 @@ function checklistExtension(plugin) {
 			return other.key === this.key;
 		}
 		toDOM(view) {
-			const el = createDiv({ cls: "tc-ticked-section" });
-			el.createDiv({ cls: "tc-ticked-label", text: `${this.count} ticked item${this.count === 1 ? "" : "s"}` });
+			const el = createDiv({ cls: "fkm-ticked-section" });
+			el.createDiv({ cls: "fkm-ticked-label", text: `${this.count} ticked item${this.count === 1 ? "" : "s"}` });
 			for (const ghost of this.ghosts) {
-				const group = el.createDiv({ cls: "tc-ghost-group" });
-				const parent = group.createDiv({ cls: "tc-ghost-item tc-ghost-parent" });
+				const group = el.createDiv({ cls: "fkm-ghost-group" });
+				const parent = group.createDiv({ cls: "fkm-ghost-item fkm-ghost-parent" });
 				parent.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox" }).disabled = true;
-				parent.createSpan({ cls: "tc-ghost-text", text: plainText(ghost.parent) });
+				parent.createSpan({ cls: "fkm-ghost-text", text: plainText(ghost.parent) });
 				for (const child of ghost.children) {
-					const row = group.createDiv({ cls: "tc-ghost-item tc-ghost-child" });
+					const row = group.createDiv({ cls: "fkm-ghost-item fkm-ghost-child" });
 					const box = row.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox" });
 					box.checked = true;
 					box.setAttribute("aria-label", "Untick");
@@ -267,7 +318,7 @@ function checklistExtension(plugin) {
 						event.preventDefault();
 						untick(view, child);
 					});
-					row.createSpan({ cls: "tc-ghost-text", text: plainText(child.text) });
+					row.createSpan({ cls: "fkm-ghost-text", text: plainText(child.text) });
 				}
 			}
 			el.addEventListener("mousedown", event => event.preventDefault());
@@ -334,7 +385,7 @@ function checklistExtension(plugin) {
 				}
 				if (!s.alignExtraLines) return;
 				// Wrapped lines of the item hang exactly under its text.
-				decos.push(Decoration.line({ class: `tc-task tc-depth-${depth}` }).range(head.from));
+				decos.push(Decoration.line({ class: `fkm-task fkm-depth-${depth}` }).range(head.from));
 				// Extra lines: keep the item's own indentation (and its guide line),
 				// replace the rest of the leading whitespace by a spacer.
 				for (let k = 1; k <= item.extra.length; k++) {
@@ -344,7 +395,7 @@ function checklistExtension(plugin) {
 					const keep = Math.min(item.indent.length, lead.length);
 					const keepOk = lead.slice(0, keep) === item.indent.slice(0, keep);
 					const from = line.from + (keepOk ? keep : 0);
-					decos.push(Decoration.line({ class: `tc-extra tc-depth-${depth}` }).range(line.from));
+					decos.push(Decoration.line({ class: `fkm-extra fkm-depth-${depth}` }).range(line.from));
 					const spacer = new SpacerWidget(depth);
 					if (line.from + lead.length > from) {
 						decos.push(Decoration.replace({ widget: spacer }).range(from, line.from + lead.length));
@@ -416,7 +467,7 @@ function checklistExtension(plugin) {
 
 	// Measure, per indent level, where item text starts (H) and where the spacer
 	// of extra lines starts, and set CSS variables on the editor:
-	// --tc-hang-N (padding / hanging indent) and --tc-spacer-N (spacer width).
+	// --fkm-hang-N (padding / hanging indent) and --fkm-spacer-N (spacer width).
 	// Only item lines are used to measure H, and a spacer's start doesn't depend on
 	// its own width, so nothing can drift. Items under the cursor or selection are
 	// skipped (Obsidian shows their raw "- [ ]" then), so nothing jumps.
@@ -444,8 +495,8 @@ function checklistExtension(plugin) {
 				write: (found, v) => {
 					for (const [depth, { hang, spacer }] of Object.entries(found)) {
 						const old = this.values[depth] ?? {};
-						if (old.hang !== hang) v.dom.style.setProperty(`--tc-hang-${depth}`, `${hang}px`);
-						if (spacer !== null && old.spacer !== spacer) v.dom.style.setProperty(`--tc-spacer-${depth}`, `${spacer}px`);
+						if (old.hang !== hang) v.dom.style.setProperty(`--fkm-hang-${depth}`, `${hang}px`);
+						if (spacer !== null && old.spacer !== spacer) v.dom.style.setProperty(`--fkm-spacer-${depth}`, `${spacer}px`);
 						this.values[depth] = { hang, spacer: spacer ?? old.spacer };
 					}
 				},
@@ -501,7 +552,7 @@ function checklistExtension(plugin) {
 					if (spacerStarts[depth] === undefined) {
 						for (let k = 1; k <= item.extra.length; k++) {
 							const lineEl = lineElAt(doc.line(item.line + k).from);
-							const spacer = lineEl?.querySelector(".tc-extra-spacer");
+							const spacer = lineEl?.querySelector(".fkm-extra-spacer");
 							if (!spacer) continue;
 							spacerStarts[depth] = spacer.getBoundingClientRect().left - lineEl.getBoundingClientRect().left;
 							break;
@@ -549,7 +600,7 @@ function checklistExtension(plugin) {
 		},
 	}]));
 
-	// Undo / redo buttons in the note's top bar (also in pop-up editors).
+	// Undo, redo, pin and colour buttons in the note's top bar (also in pop-up editors).
 	const headerButtons = ViewPlugin.fromClass(class {
 		constructor(view) {
 			const info = obsidian.editorInfoField ? view.state.field(obsidian.editorInfoField, false) : null;
@@ -577,6 +628,20 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 				await this.plugin.saveSettings();
 			}));
 
+		containerEl.createEl("h3", { text: "Notes and board" });
+		if (!this.app.plugins?.manifests?.[KEEP_VIEW_PLUGIN]) {
+			containerEl.createEl("p", {
+				cls: "setting-item-description",
+				text: "The board needs the \"Keep Bases View\" plugin (Community plugins → Browse), which draws the cards. "
+					+ "Then use the command \"Create a Keep board\".",
+			});
+		}
+		toggle("Pin button", "A pin in each note's top bar. Pinned notes are shown first on the board.", "pinButton");
+		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
+		toggle("\"Take a note…\" bar", "On the board: opens a new note in the pop-up. A new note closed without any text is thrown away, like in Keep.", "takeANote");
+		toggle("Drag cards", "Drag cards on the board to reorder them. On a phone: hold a card, then drag it.", "dragCards");
+
+		containerEl.createEl("h3", { text: "Checklists" });
 		toggle("Move ticked items down", "Ticked items drop below a \"ticked items\" divider; unticking moves them back up.", "sinkTicked");
 		toggle("Ticked sub-items under a ghost parent", "A ticked sub-item of an unticked item is shown in the ticked section, under a faded copy of its parent. The note keeps it under the parent.", "ghostParents");
 		toggle("Tick sub-items along", "Ticking or unticking an item does the same to its sub-items.", "tickSubItems");
@@ -594,12 +659,13 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 		toggle("Line up multi-line items", "Extra lines of an item (Shift+Enter) and wrapped lines start exactly under the item's text.", "alignExtraLines");
-		toggle("Undo and redo buttons", "Buttons in the note's top bar (takes effect for newly opened notes).", "undoButtons");
+		toggle("Undo and redo buttons", "Buttons in the note's top bar.", "undoButtons");
 
 		containerEl.createEl("p", {
 			cls: "setting-item-description",
-			text: `A note can opt out with the property "${OPT_OUT_PROPERTY}: false". `
-				+ "Tip: turn off Settings → Editor → \"Fold indent\" if you don't want items to be collapsible, like in Keep.",
+			text: `A note can opt out of the checklist features with the property "${OPT_OUT_PROPERTY}: false". `
+				+ "Tip: turn off Settings → Editor → \"Fold indent\" if you don't want items to be collapsible, like in Keep. "
+				+ "Changes to the top-bar buttons apply to notes opened afterwards.",
 		});
 	}
 }
@@ -610,6 +676,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.headerButtons = new Set();
+		this.pinButtons = new Map(); // MarkdownView -> its pin button
+		this.boardListeners = []; // functions that remove the board listeners
 		this.registerEditorExtension(checklistExtension(this));
 		this.addSettingTab(new FullKeepModeSettingTab(this.app, this));
 
@@ -618,12 +686,51 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			name: "Move ticked items down in this note",
 			editorCallback: editor => this.sortNote(editor.cm),
 		});
+		this.addCommand({
+			id: "take-a-note",
+			name: "Take a note",
+			callback: () => this.newNote(),
+		});
+		this.addCommand({
+			id: "create-board",
+			name: "Create a Keep board",
+			callback: () => this.createBoard(),
+		});
+
+		// Keep the pin icons in step when a note is pinned elsewhere (e.g. on the board).
+		this.registerEvent(this.app.metadataCache.on("changed", file => {
+			for (const [view, button] of this.pinButtons) if (view.file === file) this.renderPin(view, button);
+		}));
+		this.registerEvent(this.app.workspace.on("file-open", () => {
+			for (const [view, button] of this.pinButtons) this.renderPin(view, button);
+		}));
+
+		// Add the "Take a note…" bar and card dragging whenever a Keep board appears
+		// or redraws its cards.
+		this.app.workspace.onLayoutReady(() => {
+			let queued = false;
+			this.boardObserver = new MutationObserver(() => {
+				if (queued) return;
+				queued = true;
+				requestAnimationFrame(() => {
+					queued = false;
+					this.enhanceBoards();
+				});
+			});
+			this.boardObserver.observe(this.app.workspace.containerEl, { childList: true, subtree: true });
+			this.enhanceBoards();
+		});
 	}
 
 	onunload() {
 		this.headerButtons.forEach(button => button.remove());
 		this.headerButtons.clear();
-		document.querySelectorAll(".tc-drop-indicator").forEach(el => el.remove());
+		this.pinButtons.clear();
+		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
+		this.boardObserver?.disconnect();
+		this.boardListeners.forEach(remove => remove());
+		this.boardListeners = [];
+		document.querySelectorAll(".kg-container").forEach(el => delete el.fullKeepModeWired);
 	}
 
 	async loadSettings() {
@@ -653,20 +760,95 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		return this.settings.maxIndent > 0 ? base + this.settings.maxIndent : Infinity;
 	}
 
+	// Buttons in a note's top bar: undo, redo, pin, colour (like Keep's note editor).
 	addHeaderButtons(view) {
-		if (!this.settings.undoButtons || view.fullKeepModeButtons) return;
-		// addAction puts each new button in front, so this reads: undo, redo.
-		const redo = view.addAction("redo-2", "Redo", () => view.editor?.redo());
-		const undo = view.addAction("undo-2", "Undo", () => view.editor?.undo());
-		redo.addClass("tc-redo-button");
-		undo.addClass("tc-undo-button");
+		if (view.fullKeepModeButtons) return;
 		view.fullKeepModeButtons = true;
-		this.headerButtons.add(undo);
-		this.headerButtons.add(redo);
+		const s = this.settings;
+		const added = [];
+		// addAction puts each new button in front, so add them right to left.
+		if (s.colorButton) {
+			const color = view.addAction("palette", "Colour", event => this.showColorMenu(view, event));
+			color.addClass("fkm-color-button");
+			added.push(color);
+		}
+		if (s.pinButton) {
+			const pin = view.addAction("pin", "Pin", () => this.togglePin(view));
+			pin.addClass("fkm-pin-button");
+			this.pinButtons.set(view, pin);
+			this.renderPin(view, pin);
+			added.push(pin);
+		}
+		if (s.undoButtons) {
+			const redo = view.addAction("redo-2", "Redo", () => view.editor?.redo());
+			const undo = view.addAction("undo-2", "Undo", () => view.editor?.undo());
+			redo.addClass("fkm-redo-button");
+			undo.addClass("fkm-undo-button");
+			added.push(redo, undo);
+		}
+		added.forEach(button => this.headerButtons.add(button));
 		view.register(() => {
-			this.headerButtons.delete(undo);
-			this.headerButtons.delete(redo);
+			added.forEach(button => this.headerButtons.delete(button));
+			this.pinButtons.delete(view);
 			delete view.fullKeepModeButtons;
+		});
+	}
+
+	// ----- pin and colour -----------------------------------------------------------------
+
+	frontmatterOf(file) {
+		return file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {};
+	}
+
+	isPinned(file) {
+		const value = this.frontmatterOf(file)[PIN_PROPERTY];
+		return value === true || value === "true";
+	}
+
+	renderPin(view, button) {
+		const pinned = this.isPinned(view.file);
+		button.toggleClass("is-pinned", pinned);
+		button.setAttribute("aria-label", pinned ? "Unpin" : "Pin");
+		obsidian.setIcon(button, pinned ? "pin-off" : "pin");
+	}
+
+	async togglePin(view) {
+		const file = view.file;
+		if (!file || file.extension !== "md") return;
+		const pinned = this.isPinned(file);
+		await this.app.fileManager.processFrontMatter(file, fm => {
+			if (pinned) delete fm[PIN_PROPERTY];
+			else fm[PIN_PROPERTY] = true;
+		});
+		new obsidian.Notice(pinned ? "Unpinned" : "Pinned");
+	}
+
+	showColorMenu(view, event) {
+		const file = view.file;
+		if (!file || file.extension !== "md") return;
+		const current = this.frontmatterOf(file)[COLOR_PROPERTY] ?? null;
+		const menu = new obsidian.Menu();
+		for (const color of COLORS) {
+			menu.addItem(item => {
+				item.setTitle(color.name)
+					.setChecked(color.id === current)
+					.onClick(() => this.setColor(file, color.id));
+				const icon = item.dom?.querySelector?.(".menu-item-icon");
+				if (icon) {
+					obsidian.setIcon(icon, "circle");
+					icon.addClass("fkm-color-swatch");
+					if (color.hex) icon.style.setProperty("--fkm-swatch", color.hex);
+				}
+			});
+		}
+		if (event instanceof MouseEvent) menu.showAtMouseEvent(event);
+		else menu.showAtPosition({ x: 0, y: 0 });
+	}
+
+	async setColor(file, colorId) {
+		await this.app.fileManager.processFrontMatter(file, fm => {
+			if (colorId) fm[COLOR_PROPERTY] = colorId;
+			else delete fm[COLOR_PROPERTY];
 		});
 	}
 
@@ -705,8 +887,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const rest = [...items.slice(0, index), ...items.slice(unitEnd)];
 		const original = doc.sliceString(doc.line(block.fromLine).from, doc.line(block.toLine).to);
 		const startX = event.clientX;
-		const indicator = document.body.createDiv({ cls: "tc-drop-indicator" });
-		grip.closest(".cm-line")?.addClass("tc-item-dragging");
+		const indicator = document.body.createDiv({ cls: "fkm-drop-indicator" });
+		grip.closest(".cm-line")?.addClass("fkm-item-dragging");
 		let drop = null;
 
 		const itemAtLine = n => {
@@ -755,7 +937,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			grip.removeEventListener("pointerup", finish);
 			grip.removeEventListener("pointercancel", finish);
 			indicator.remove();
-			view.dom.querySelectorAll(".tc-item-dragging").forEach(el => el.removeClass("tc-item-dragging"));
+			view.dom.querySelectorAll(".fkm-item-dragging").forEach(el => el.removeClass("fkm-item-dragging"));
 			if (e.type !== "pointerup" || !drop) return;
 			const now = view.state.doc;
 			if (block.toLine > now.lines) return;
@@ -778,4 +960,304 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		grip.addEventListener("pointerup", finish);
 		grip.addEventListener("pointercancel", finish);
 	}
+
+	// ----- the board (Keep Bases View) ------------------------------------------------------
+
+	enhanceBoards() {
+		const s = this.settings;
+		this.app.workspace.containerEl.querySelectorAll(".kg-container").forEach(container => {
+			const bar = container.querySelector(":scope > .fkm-take-note");
+			if (s.takeANote && !bar) {
+				const el = createDiv({ cls: "fkm-take-note" });
+				obsidian.setIcon(el.createSpan({ cls: "fkm-take-note-icon" }), "plus");
+				el.createSpan({ text: "Take a note…" });
+				el.addEventListener("click", () => this.newNote());
+				container.prepend(el);
+			} else if (!s.takeANote && bar) {
+				bar.remove();
+			}
+			if (s.dragCards && !container.fullKeepModeWired) {
+				container.fullKeepModeWired = true;
+				if (obsidian.Platform.isMobile) this.wireTouchDrag(container);
+				else this.wireMouseDrag(container);
+			}
+		});
+	}
+
+	// A board listener that is removed again when the plugin unloads.
+	listenOn(el, type, handler, options) {
+		el.addEventListener(type, handler, options);
+		this.boardListeners.push(() => el.removeEventListener(type, handler, options));
+	}
+
+	// A card being dragged: a copy of it follows the pointer, the card under the
+	// pointer is highlighted, and dropping returns that card's note.
+	cardDrag(container, card, x, y) {
+		const rect = card.getBoundingClientRect();
+		const grab = { x: x - rect.left, y: y - rect.top };
+		const ghost = card.cloneNode(true);
+		ghost.removeAttribute("data-path"); // never a drop target
+		ghost.removeAttribute("style"); // drop the board's own positioning
+		ghost.className = card.className;
+		ghost.removeClass("fkm-lifted", "fkm-dragging", "fkm-drop-target");
+		ghost.addClass("fkm-drag-ghost");
+		ghost.style.width = `${rect.width}px`;
+		ghost.style.height = `${rect.height}px`;
+		document.body.appendChild(ghost);
+		document.body.addClass("fkm-card-drag-active"); // no text selection while dragging
+		card.removeClass("fkm-lifted");
+		card.addClass("fkm-dragging");
+		let over = null;
+		const EDGE = 60; // px from the board's top/bottom edge that scrolls while dragging
+		const drag = {
+			move: (px, py) => {
+				ghost.style.transform = `translate(${px - grab.x}px, ${py - grab.y}px) rotate(2deg)`;
+				const target = document.elementFromPoint(px, py)?.closest?.(".kg-card[data-path]") ?? null;
+				if (target !== over) {
+					over?.removeClass("fkm-drop-target");
+					over = target && target !== card ? target : null;
+					over?.addClass("fkm-drop-target");
+				}
+				const box = container.getBoundingClientRect();
+				if (py < box.top + EDGE) container.scrollTop -= 12;
+				else if (py > box.bottom - EDGE) container.scrollTop += 12;
+			},
+			end: () => {
+				ghost.remove();
+				document.body.removeClass("fkm-card-drag-active");
+				card.removeClass("fkm-dragging");
+				over?.removeClass("fkm-drop-target");
+				return over?.getAttribute("data-path") ?? null;
+			},
+		};
+		drag.move(x, y);
+		return drag;
+	}
+
+	// Mouse: press on a card and move it a little to start dragging; a click
+	// without moving still opens the note.
+	wireMouseDrag(container) {
+		const THRESHOLD = 6;
+		let pressed = null; // { card, x, y }
+		let drag = null;
+		let swallowClick = false;
+		const onMove = event => {
+			if (!pressed) return;
+			if (!drag) {
+				if (Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < THRESHOLD) return;
+				drag = this.cardDrag(container, pressed.card, event.clientX, event.clientY);
+			}
+			event.preventDefault();
+			drag.move(event.clientX, event.clientY);
+		};
+		const onUp = () => {
+			document.removeEventListener("pointermove", onMove, true);
+			document.removeEventListener("pointerup", onUp, true);
+			if (drag) {
+				const from = pressed.card.getAttribute("data-path");
+				const target = drag.end();
+				swallowClick = true; // the click that follows a drag must not open the note
+				setTimeout(() => { swallowClick = false; }, 0);
+				if (target && target !== from) void this.moveNote(from, target);
+			}
+			pressed = null;
+			drag = null;
+		};
+		this.listenOn(container, "pointerdown", event => {
+			if (event.pointerType !== "mouse" || event.button !== 0) return;
+			const card = event.target?.closest?.(".kg-card[data-path]");
+			if (!card || event.target.closest("a, button, input, .kg-card-actions, .kg-pin-btn")) return;
+			pressed = { card, x: event.clientX, y: event.clientY };
+			document.addEventListener("pointermove", onMove, true);
+			document.addEventListener("pointerup", onUp, true);
+		});
+		this.listenOn(container, "click", event => {
+			if (!swallowClick) return;
+			event.preventDefault();
+			event.stopPropagation();
+		}, { capture: true });
+		// Cards must not start the browser's own drag (images, selected text).
+		this.listenOn(container, "dragstart", event => {
+			if (pressed) event.preventDefault();
+		}, { capture: true });
+	}
+
+	// Touch: hold a card, then drag it. Holding and letting go without moving opens
+	// the card's menu (Pin, Change colour, Delete); a quick swipe still scrolls.
+	wireTouchDrag(container) {
+		const HOLD_MS = 350;
+		const TOLERANCE = 10;
+		let card = null;
+		let start = null;
+		let timer = null;
+		let armed = false;
+		let drag = null;
+		let replayingMenu = false;
+		const reset = () => {
+			clearTimeout(timer);
+			timer = null;
+			card?.removeClass("fkm-lifted");
+			drag?.end();
+			drag = null;
+			card = null;
+			start = null;
+			armed = false;
+		};
+
+		this.listenOn(container, "touchstart", event => {
+			reset();
+			if (event.touches.length !== 1) return;
+			const touched = event.target?.closest?.(".kg-card[data-path]");
+			if (!touched) return;
+			card = touched;
+			start = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+			timer = setTimeout(() => {
+				armed = true;
+				card?.addClass("fkm-lifted");
+			}, HOLD_MS);
+		}, { passive: true });
+
+		this.listenOn(container, "touchmove", event => {
+			if (!card) return;
+			const touch = event.touches[0];
+			if (!armed) {
+				// Moved before the hold finished: it's a scroll, not a drag.
+				if (Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > TOLERANCE) reset();
+				return;
+			}
+			event.preventDefault(); // stop the board scrolling under the finger
+			if (!drag) drag = this.cardDrag(container, card, touch.clientX, touch.clientY);
+			drag.move(touch.clientX, touch.clientY);
+		}, { passive: false });
+
+		this.listenOn(container, "touchend", event => {
+			if (!card) return;
+			const held = card;
+			const from = held.getAttribute("data-path");
+			const at = start;
+			if (drag) {
+				event.preventDefault(); // no tap on the card after a drag
+				const target = drag.end();
+				drag = null;
+				reset();
+				if (target && target !== from) void this.moveNote(from, target);
+			} else if (armed) {
+				// Held without moving: open the card's usual menu.
+				event.preventDefault();
+				reset();
+				replayingMenu = true;
+				held.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y }));
+				replayingMenu = false;
+			} else {
+				reset();
+			}
+		}, { passive: false });
+
+		this.listenOn(container, "touchcancel", reset);
+
+		// While a card is held, keep the system's own long-press menu away;
+		// the card menu is shown on release instead.
+		this.listenOn(container, "contextmenu", event => {
+			if (replayingMenu || !card) return;
+			event.preventDefault();
+			event.stopPropagation();
+		}, { capture: true });
+	}
+
+	// The board sorts by keep_order, or the creation time for notes without one
+	// (see BOARD_BASE). A moved note gets a value between the target and the
+	// target's neighbour on the far side, so it lands in the target's place.
+	boardOrder(file) {
+		const value = Number(this.frontmatterOf(file)[ORDER_PROPERTY]);
+		return value ? value : file.stat.ctime;
+	}
+
+	async moveNote(fromPath, targetPath) {
+		const from = this.app.vault.getAbstractFileByPath(fromPath);
+		const target = this.app.vault.getAbstractFileByPath(targetPath);
+		if (!(from instanceof obsidian.TFile) || !(target instanceof obsidian.TFile)) return;
+		const pinned = this.isPinned(target);
+		if (this.isPinned(from) !== pinned) {
+			new obsidian.Notice("Use the pin to move a note between Pinned and Others.");
+			return;
+		}
+		const list = this.app.vault.getMarkdownFiles()
+			.filter(f => f !== from && this.isPinned(f) === pinned)
+			.map(f => ({ file: f, order: this.boardOrder(f) }))
+			.sort((a, b) => b.order - a.order);
+		const index = list.findIndex(item => item.file === target);
+		if (index < 0) return;
+		const targetOrder = list[index].order;
+		const movingDown = this.boardOrder(from) > targetOrder;
+		const neighbour = movingDown ? list[index + 1] : list[index - 1];
+		const value = neighbour ? (targetOrder + neighbour.order) / 2 : targetOrder + (movingDown ? -1000 : 1000);
+		if (value === targetOrder || value === neighbour?.order) {
+			new obsidian.Notice("Couldn't place the note there.");
+			return;
+		}
+		await this.app.fileManager.processFrontMatter(from, fm => {
+			fm[ORDER_PROPERTY] = value;
+		});
+	}
+
+	// ----- new notes and the board command ---------------------------------------------------
+
+	async newNote() {
+		const parent = this.app.fileManager.getNewFileParent("");
+		// Obsidian's own "Untitled" (in the app's language), where available.
+		const file = typeof this.app.fileManager.createNewMarkdownFile === "function"
+			? await this.app.fileManager.createNewMarkdownFile(parent)
+			: await this.app.vault.create(obsidian.normalizePath(`${parent.path}/Untitled ${Date.now()}.md`), "");
+		new NewNoteModal(this.app, file).open();
+	}
+
+	async createBoard() {
+		if (!this.app.plugins?.manifests?.[KEEP_VIEW_PLUGIN]) {
+			new obsidian.Notice("The board needs the \"Keep Bases View\" plugin: install it under Settings → Community plugins → Browse.", 10000);
+			return;
+		}
+		let path = "Keep board.base";
+		for (let i = 2; this.app.vault.getAbstractFileByPath(path); i++) path = `Keep board ${i}.base`;
+		const file = await this.app.vault.create(path, BOARD_BASE);
+		await this.app.workspace.getLeaf(false).openFile(file);
+	}
 };
+
+// A new note in the same pop-up Keep Bases View opens when you click a card (it
+// styles .kg-edit-modal), with the title selected so you can type it straight
+// away. Closed untouched (no text, title unchanged), the note is thrown away.
+class NewNoteModal extends obsidian.Modal {
+	constructor(app, file) {
+		super(app);
+		this.file = file;
+		this.createdName = file.basename;
+		this.leaf = null;
+	}
+
+	async onOpen() {
+		this.modalEl.addClass("kg-edit-modal", "fkm-new-note-modal");
+		const width = this.app.plugins?.plugins?.[KEEP_VIEW_PLUGIN]?.settings?.popupWidth || 800;
+		this.modalEl.style.setProperty("max-width", `${width}px`, "important");
+		this.contentEl.empty();
+		try {
+			const WorkspaceLeaf = this.app.workspace.getLeaf(false).constructor;
+			this.leaf = new WorkspaceLeaf(this.app);
+			this.contentEl.appendChild(this.leaf.containerEl);
+			await this.leaf.openFile(this.file, { state: { mode: "source" }, eState: { rename: "all" } });
+		} catch (err) {
+			console.error("[Full Keep Mode] Couldn't open the new note:", err);
+			this.contentEl.createEl("p", { text: "Couldn't open the editor." });
+		}
+	}
+
+	async onClose() {
+		this.leaf?.detach();
+		this.leaf = null;
+		this.contentEl.empty();
+		const file = this.app.vault.getAbstractFileByPath(this.file.path);
+		if (file instanceof obsidian.TFile && file.basename === this.createdName) {
+			const text = await this.app.vault.read(file);
+			if (text.trim() === "") await this.app.fileManager.trashFile(file);
+		}
+	}
+}

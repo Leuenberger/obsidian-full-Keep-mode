@@ -57,7 +57,7 @@ def shot(ms, hover=None):
 
 def drag_recorded(label, dx, target=None, lower=True):
     g = lt.ob.js(lt.line_el(label) + """
-    const g = el.querySelector(".tc-grip").getBoundingClientRect();
+    const g = el.querySelector(".fkm-grip").getBoundingClientRect();
     return { x: g.left + g.width / 2, y: g.top + g.height / 2 };""")
     x, y = g["x"], g["y"]
     ty = y

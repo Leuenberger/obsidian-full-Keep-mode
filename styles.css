@@ -1,7 +1,89 @@
-/* Tidy Checklists */
+/* Full Keep Mode */
+
+/* ===== Notes and board ===== */
+
+/* Pinned note: the pin in the top bar in the accent colour. */
+.fkm-pin-button.is-pinned {
+	color: var(--interactive-accent);
+}
+
+/* Colour menu: a filled dot per colour. */
+.fkm-color-swatch svg {
+	fill: var(--fkm-swatch, transparent);
+	color: var(--fkm-swatch, var(--text-muted));
+}
+
+/* "Take a note…" bar at the top of the board, like Google Keep's. */
+.fkm-take-note {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: 600px;
+	margin: 16px auto 8px;
+	padding: 12px 16px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: var(--shadow-s);
+	color: var(--text-muted);
+	cursor: text;
+}
+
+.fkm-take-note:hover {
+	box-shadow: var(--shadow-l);
+}
+
+.fkm-take-note-icon {
+	display: flex;
+	color: var(--text-faint);
+}
+
+/* Dragging cards. */
+.kg-card.fkm-dragging {
+	opacity: 0.4;
+}
+
+.kg-card.fkm-drop-target {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+/* Phone: a held card is "lifted" and ready to drag. (No transform: the board
+   positions cards with transforms.) */
+.kg-card.fkm-lifted {
+	box-shadow: 0 0 0 2px var(--interactive-accent), var(--shadow-l);
+}
+
+/* The copy of the card that follows the pointer while dragging. */
+.kg-card.fkm-drag-ghost {
+	position: fixed;
+	top: 0;
+	left: 0;
+	margin: 0;
+	z-index: var(--layer-dragged-item, 1000);
+	pointer-events: none;
+	opacity: 0.95;
+	box-shadow: var(--shadow-l);
+	will-change: transform;
+}
+
+body.fkm-card-drag-active {
+	-webkit-user-select: none;
+	user-select: none;
+	cursor: grabbing;
+}
+
+/* Phone: holding a card must not select its text or open the iOS callout. */
+.is-mobile .kg-card {
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+
+/* ===== Checklists ===== */
 
 /* ----- Drag grip: floats left of the checkbox, taking no space ----- */
-.tc-grip {
+.fkm-grip {
 	position: absolute;
 	display: inline-flex;
 	align-items: center;
@@ -16,26 +98,26 @@
 	-webkit-user-select: none;
 }
 
-.tc-grip svg {
+.fkm-grip svg {
 	width: 14px;
 	height: 14px;
 }
 
-.cm-line:hover .tc-grip,
-.is-mobile .tc-grip {
+.cm-line:hover .fkm-grip,
+.is-mobile .fkm-grip {
 	opacity: 0.6;
 }
 
-.tc-grip:active {
+.fkm-grip:active {
 	cursor: grabbing;
 }
 
-.cm-line.tc-item-dragging {
+.cm-line.fkm-item-dragging {
 	opacity: 0.4;
 }
 
 /* Where a dragged item will land. */
-.tc-drop-indicator {
+.fkm-drop-indicator {
 	position: fixed;
 	height: 2px;
 	background: var(--interactive-accent);
@@ -44,32 +126,32 @@
 	display: none;
 }
 
-.tc-drop-indicator.is-visible {
+.fkm-drop-indicator.is-visible {
 	display: block;
 }
 
 /* ----- Multi-line items: every line starts under the item's text -----
-   The plugin measures --tc-hang-N and --tc-spacer-N per indent level N. */
-.tc-extra-spacer {
+   The plugin measures --fkm-hang-N and --fkm-spacer-N per indent level N. */
+.fkm-extra-spacer {
 	display: inline-block;
 }
 
-.cm-line.tc-task.tc-depth-0, .cm-line.tc-extra.tc-depth-0 { padding-inline-start: var(--tc-hang-0, 31px) !important; text-indent: calc(-1 * var(--tc-hang-0, 31px)) !important; }
-.cm-line.tc-task.tc-depth-1, .cm-line.tc-extra.tc-depth-1 { padding-inline-start: var(--tc-hang-1, 67px) !important; text-indent: calc(-1 * var(--tc-hang-1, 67px)) !important; }
-.cm-line.tc-task.tc-depth-2, .cm-line.tc-extra.tc-depth-2 { padding-inline-start: var(--tc-hang-2, 103px) !important; text-indent: calc(-1 * var(--tc-hang-2, 103px)) !important; }
-.cm-line.tc-task.tc-depth-3, .cm-line.tc-extra.tc-depth-3 { padding-inline-start: var(--tc-hang-3, 139px) !important; text-indent: calc(-1 * var(--tc-hang-3, 139px)) !important; }
-.cm-line.tc-task.tc-depth-4, .cm-line.tc-extra.tc-depth-4 { padding-inline-start: var(--tc-hang-4, 175px) !important; text-indent: calc(-1 * var(--tc-hang-4, 175px)) !important; }
-.cm-line.tc-task.tc-depth-5, .cm-line.tc-extra.tc-depth-5 { padding-inline-start: var(--tc-hang-5, 211px) !important; text-indent: calc(-1 * var(--tc-hang-5, 211px)) !important; }
+.cm-line.fkm-task.fkm-depth-0, .cm-line.fkm-extra.fkm-depth-0 { padding-inline-start: var(--fkm-hang-0, 31px) !important; text-indent: calc(-1 * var(--fkm-hang-0, 31px)) !important; }
+.cm-line.fkm-task.fkm-depth-1, .cm-line.fkm-extra.fkm-depth-1 { padding-inline-start: var(--fkm-hang-1, 67px) !important; text-indent: calc(-1 * var(--fkm-hang-1, 67px)) !important; }
+.cm-line.fkm-task.fkm-depth-2, .cm-line.fkm-extra.fkm-depth-2 { padding-inline-start: var(--fkm-hang-2, 103px) !important; text-indent: calc(-1 * var(--fkm-hang-2, 103px)) !important; }
+.cm-line.fkm-task.fkm-depth-3, .cm-line.fkm-extra.fkm-depth-3 { padding-inline-start: var(--fkm-hang-3, 139px) !important; text-indent: calc(-1 * var(--fkm-hang-3, 139px)) !important; }
+.cm-line.fkm-task.fkm-depth-4, .cm-line.fkm-extra.fkm-depth-4 { padding-inline-start: var(--fkm-hang-4, 175px) !important; text-indent: calc(-1 * var(--fkm-hang-4, 175px)) !important; }
+.cm-line.fkm-task.fkm-depth-5, .cm-line.fkm-extra.fkm-depth-5 { padding-inline-start: var(--fkm-hang-5, 211px) !important; text-indent: calc(-1 * var(--fkm-hang-5, 211px)) !important; }
 
-.tc-extra-spacer.tc-depth-0 { width: var(--tc-spacer-0, 31px); }
-.tc-extra-spacer.tc-depth-1 { width: var(--tc-spacer-1, 31px); }
-.tc-extra-spacer.tc-depth-2 { width: var(--tc-spacer-2, 31px); }
-.tc-extra-spacer.tc-depth-3 { width: var(--tc-spacer-3, 31px); }
-.tc-extra-spacer.tc-depth-4 { width: var(--tc-spacer-4, 31px); }
-.tc-extra-spacer.tc-depth-5 { width: var(--tc-spacer-5, 31px); }
+.fkm-extra-spacer.fkm-depth-0 { width: var(--fkm-spacer-0, 31px); }
+.fkm-extra-spacer.fkm-depth-1 { width: var(--fkm-spacer-1, 31px); }
+.fkm-extra-spacer.fkm-depth-2 { width: var(--fkm-spacer-2, 31px); }
+.fkm-extra-spacer.fkm-depth-3 { width: var(--fkm-spacer-3, 31px); }
+.fkm-extra-spacer.fkm-depth-4 { width: var(--fkm-spacer-4, 31px); }
+.fkm-extra-spacer.fkm-depth-5 { width: var(--fkm-spacer-5, 31px); }
 
 /* ----- "N ticked items" divider and ghost parents ----- */
-.tc-ticked-section {
+.fkm-ticked-section {
 	margin: 6px 0 2px;
 	padding-top: 6px;
 	border-top: 1px solid var(--background-modifier-border);
@@ -77,31 +159,31 @@
 	-webkit-user-select: none;
 }
 
-.tc-ticked-label {
+.fkm-ticked-label {
 	color: var(--text-muted);
 	font-size: var(--font-ui-small);
 }
 
-.tc-ghost-group {
+.fkm-ghost-group {
 	margin-top: 4px;
 }
 
-.tc-ghost-item {
+.fkm-ghost-item {
 	display: flex;
 	align-items: baseline;
 	gap: 6px;
 	padding: 1px 0 1px 20px;
 }
 
-.tc-ghost-parent {
+.fkm-ghost-parent {
 	opacity: 0.5;
 }
 
-.tc-ghost-child {
+.fkm-ghost-child {
 	padding-left: 48px;
 }
 
-.tc-ghost-child .tc-ghost-text {
+.fkm-ghost-child .fkm-ghost-text {
 	text-decoration: line-through;
 	color: var(--text-muted);
 }

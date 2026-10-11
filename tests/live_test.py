@@ -120,7 +120,7 @@ def click_checkbox(label):
 
 def drag(label, dx, target=None, lower=True):
     g = ob.js(line_el(label) + """
-    const g = el.querySelector(".tc-grip").getBoundingClientRect();
+    const g = el.querySelector(".fkm-grip").getBoundingClientRect();
     return { x: g.left + g.width / 2, y: g.top + g.height / 2 };
     """)
     x, y = g["x"], g["y"]
@@ -157,6 +157,83 @@ def undo():
 
 HEAD = "Test list:\n\n\n"
 
+
+# ----- board helpers (needs the Keep Bases View plugin) ---------------------------------------
+
+BOARD = f"""filters:
+  and:
+    - 'file.ext == "md"'
+    - file.inFolder("{FOLDER}")
+    - file.name.startsWith("Card ")
+formulas:
+  board_order: 'if(keep_order, keep_order, number(file.ctime))'
+views:
+  - type: keep-grid-view
+    name: Board
+    sort:
+      - property: keep_pinned
+        direction: DESC
+      - property: formula.board_order
+        direction: DESC
+"""
+
+
+def open_board(cards):
+    """Create test cards {name: keep_order} and a board showing only them."""
+    notes = {name: f"---\nkeep_order: {order}\n---\nText of {name}\n" for name, order in cards.items()}
+    ob.js(PRELUDE + f"""
+    if (!app.vault.getAbstractFileByPath(FOLDER)) await app.vault.createFolder(FOLDER);
+    for (const [name, text] of Object.entries({json.dumps(notes)})) {{
+        const p = FOLDER + "/" + name + ".md";
+        const f = app.vault.getAbstractFileByPath(p);
+        if (f) await app.vault.modify(f, text); else await app.vault.create(p, text);
+    }}
+    const bp = FOLDER + "/board.base";
+    let b = app.vault.getAbstractFileByPath(bp);
+    if (b) await app.vault.modify(b, {json.dumps(BOARD)}); else b = await app.vault.create(bp, {json.dumps(BOARD)});
+    const leaf = app.workspace.getLeaf("tab");
+    await leaf.openFile(b);
+    app.workspace.setActiveLeaf(leaf, {{ focus: true }});
+    window.__fkmBoard = leaf;
+    await wait(2500);
+    """)
+
+
+def card_order():
+    """Cards as they appear on screen: top to bottom, then left to right."""
+    return ob.js("""return [...window.__fkmBoard.view.containerEl.querySelectorAll('.kg-card[data-path]')]
+                    .map(c => ({ r: c.getBoundingClientRect(), name: c.getAttribute('data-path').split('/').pop().replace('.md', '') }))
+                    .sort((a, b) => Math.round(a.r.top / 20) - Math.round(b.r.top / 20) || a.r.left - b.r.left)
+                    .map(c => c.name);""")
+
+
+def press_escape():
+    """Real Escape keys until the topmost (test) pop-up is closed. The first one may
+    only end editing the title; at most three."""
+    before = modal_open()
+    for _ in range(3):
+        ob.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+        ob.call("Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+        time.sleep(0.8)
+        if modal_open() < before:
+            break
+    time.sleep(0.6)
+
+
+def card_center(name):
+    return ob.js(f"""const c = [...window.__fkmBoard.view.containerEl.querySelectorAll('.kg-card[data-path]')]
+                     .find(c => c.getAttribute('data-path').endsWith('/{name}.md'));
+                     const r = c.getBoundingClientRect(); return {{ x: r.left + r.width / 2, y: r.top + 20 }};""")
+
+
+def frontmatter(name):
+    return ob.js(f"""const f = app.vault.getAbstractFileByPath(FOLDER_PATH + '/{name}.md');
+                     return app.metadataCache.getFileCache(f)?.frontmatter ?? {{}};""".replace("FOLDER_PATH", json.dumps(FOLDER)))
+
+
+def modal_open():
+    return ob.js("return [...document.querySelectorAll('.modal-container .kg-edit-modal')].filter(m => !m.closest('[data-tc-hidden]')).length;")
+
 # ----- the tests -----------------------------------------------------------------------------
 
 def main():
@@ -172,7 +249,7 @@ def main():
         open_note("ticking", HEAD + start)
         click_checkbox("A")
         check("ticked item moves below the others", body() == "- [ ] B\n→- [ ] B1\n- [ ] C\n- [x] A", body())
-        section = ob.js("return [...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.tc-ticked-label')].map(e => e.textContent);")
+        section = ob.js("return [...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.fkm-ticked-label')].map(e => e.textContent);")
         check("divider shows \"1 ticked item\"", section == ["1 ticked item"], section)
         undo()
         check("one undo restores the list exactly", body() == start.replace("\t", "→"), body())
@@ -182,11 +259,11 @@ def main():
         print("Ghost parents")
         open_note("ghosts", HEAD + "- [ ] P\n\t- [ ] P1\n\t- [ ] P2\n- [ ] Q")
         click_checkbox("P2")
-        ghost = ob.js("""const s = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.tc-ticked-section');
+        ghost = ob.js("""const s = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ticked-section');
                          return s ? s.innerText.replace(/\\n+/g, ' | ') : null;""")
         check("ticked sub-item shows under a ghost parent", ghost == "1 ticked item | P | P2", ghost)
         check("…while the note keeps it under its parent", body() == "- [ ] P\n→- [ ] P1\n→- [x] P2\n- [ ] Q", body())
-        ob.js(PRELUDE + """const box = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.tc-ghost-child input'); box.click(); await wait(700);""")
+        ob.js(PRELUDE + """const box = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ghost-child input'); box.click(); await wait(700);""")
         check("unticking it in the ghost section brings it back", body() == "- [ ] P\n→- [ ] P1\n→- [ ] P2\n- [ ] Q", body())
 
         print("Drag and drop (real mouse events)")
@@ -245,8 +322,69 @@ def main():
         open_note("opted out", "---\nfull-keep-mode: false\n---\n" + HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": True})
         time.sleep(1)
         click_checkbox("A")
-        grips = ob.js("return window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.tc-grip').length;")
+        grips = ob.js("return window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.fkm-grip').length;")
         check("a note with full-keep-mode: false is left alone", body() == "- [x] A\n- [ ] B" and grips == 0, (body(), grips))
+
+        print("Board (Keep Bases View)")
+        has_board = ob.js("return !!app.plugins.plugins['keep-bases-view'];")
+        if not has_board:
+            print("  skipped: the Keep Bases View plugin isn't enabled")
+        else:
+            open_board({"Card A": 300, "Card B": 200, "Card C": 100})
+            bar = ob.js("""const el = window.__fkmBoard.view.containerEl;
+                return { inBoard: !!el.querySelector('.fkm-take-note'), boards: el.querySelectorAll('.kg-container').length,
+                         anywhere: document.querySelectorAll('.fkm-take-note').length };""")
+            check("the board has a \"Take a note…\" bar", bar["inBoard"], bar)
+            check("cards are in board order", card_order() == ["Card A", "Card B", "Card C"], card_order())
+            a, c = card_center("Card A"), card_center("Card C")
+            ob.mouse("mouseMoved", c["x"], c["y"], 0)
+            ob.mouse("mousePressed", c["x"], c["y"])
+            for k in range(1, 11):
+                ob.mouse("mouseMoved", c["x"] + (a["x"] - c["x"]) * k / 10, c["y"] + (a["y"] - c["y"]) * k / 10)
+                time.sleep(0.04)
+            ob.mouse("mouseReleased", a["x"], a["y"])
+            time.sleep(2)
+            check("dragging a card onto another puts it in that card's place", card_order() == ["Card C", "Card A", "Card B"], card_order())
+            check("…without opening the note", modal_open() == 0)
+
+            b = card_center("Card B")
+            ob.mouse("mouseMoved", b["x"], b["y"], 0)
+            ob.mouse("mousePressed", b["x"], b["y"])
+            ob.mouse("mouseReleased", b["x"], b["y"])
+            time.sleep(1.5)
+            check("clicking a card still opens it in the pop-up", modal_open() == 1)
+            labels = ob.js("return [...document.querySelectorAll('.kg-edit-modal .view-actions .clickable-icon')].map(b => b.getAttribute('aria-label').split('\\n')[0]);")
+            check("the pop-up's top bar has Undo, Redo, Pin and Colour", all(x in labels for x in ("Undo", "Redo", "Pin", "Colour")), labels)
+            ob.js(PRELUDE + "document.querySelector('.kg-edit-modal .fkm-pin-button').click(); await wait(800);")
+            check("the Pin button pins the note", frontmatter("Card B").get("keep_pinned") is True, frontmatter("Card B"))
+            ob.js(PRELUDE + """document.querySelector('.kg-edit-modal .fkm-color-button').click(); await wait(400);
+                const item = [...document.querySelectorAll('.menu .menu-item')].find(i => i.textContent.trim() === 'Blue');
+                item.click(); await wait(800);""")
+            check("the Colour button sets the colour", frontmatter("Card B").get("keep_color") == "blue", frontmatter("Card B"))
+            press_escape()
+            time.sleep(1)
+            check("a pinned note moves to the top of the board", card_order()[0] == "Card B", card_order())
+
+            # "Take a note…": an untouched new note is thrown away, one with text stays.
+            ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note').click(); await wait(1500);")
+            new_path = ob.js("""const m = document.querySelector('.fkm-new-note-modal');
+                const t = m?.querySelector('.inline-title, .view-header-title'); return m ? (t?.textContent ?? '') : null;""")
+            check("\"Take a note…\" opens a new note in the pop-up", new_path is not None, new_path)
+            path = ob.js("""const files = app.vault.getMarkdownFiles().sort((a, b) => b.stat.ctime - a.stat.ctime);
+                return files[0]?.path;""")
+            press_escape()
+            gone = ob.js(f"return !app.vault.getAbstractFileByPath({json.dumps(path)});")
+            check("…which is thrown away when closed untouched", gone, path)
+            ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note').click(); await wait(1500);")
+            path = ob.js("""const files = app.vault.getMarkdownFiles().sort((a, b) => b.stat.ctime - a.stat.ctime);
+                return files[0]?.path;""")
+            ob.js(PRELUDE + f"""await app.vault.modify(app.vault.getAbstractFileByPath({json.dumps(path)}), 'Milk');
+                await wait(800);""")
+            press_escape()
+            kept = ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(path)}); return f ? await app.vault.read(f) : null;")
+            check("…and kept when it has text", kept == "Milk", kept)
+            ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(path)}); if (f) await app.vault.trash(f, true);")
+            ob.js("window.__fkmBoard.detach();")
 
         print("Command and header buttons")
         open_note("command", HEAD + "- [x] A\n- [ ] B\n- [x] C\n- [ ] D")
@@ -254,7 +392,7 @@ def main():
         check("\"Move ticked items down in this note\" sorts an existing list", body() == "- [ ] B\n- [ ] D\n- [x] A\n- [x] C", body())
         labels = ob.js("return [...window.__tcLeaf.view.containerEl.querySelectorAll('.view-actions .clickable-icon')].map(b => b.getAttribute('aria-label'));")
         check("Undo and Redo buttons in the note's top bar", "Undo" in labels and "Redo" in labels, labels)
-        ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.tc-undo-button').click(); await wait(400);")
+        ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-undo-button').click(); await wait(400);")
         check("the Undo button undoes", body() == "- [x] A\n- [ ] B\n- [x] C\n- [ ] D", body())
 
     finally:
