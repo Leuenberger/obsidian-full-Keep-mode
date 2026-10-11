@@ -1,6 +1,6 @@
-# Tidy Checklists
+# Keep-style Checklists for Obsidian
 
-Checklists in Obsidian that behave like Google Keep's: ticked items get out of
+An [Obsidian](https://obsidian.md) plugin: checklists that behave like Google Keep's: ticked items get out of
 the way, items can be dragged around and indented with a mouse or a finger, and
 long items stay neatly lined up.
 
@@ -52,7 +52,7 @@ The plugin follows Google Keep's behaviour:
 | Line up multi-line items | on |
 | Undo and redo buttons | on |
 
-To leave a single note alone, give it the property `tidy-checklists: false`.
+To leave a single note alone, give it the property `keep-style-checklists: false`.
 
 Tip: to make list items non-collapsible like in Keep, turn off
 **Settings → Editor → Fold indent**.
@@ -63,11 +63,11 @@ lists that already have ticked items in between.
 ## Installation
 
 From Obsidian: **Settings → Community plugins → Browse**, search for
-"Tidy Checklists", install and enable.
+"Keep-style Checklists", install and enable.
 
 Manually: download `main.js`, `manifest.json` and `styles.css` from the
 [latest release](../../releases/latest) into
-`<your vault>/.obsidian/plugins/tidy-checklists/`, then enable the plugin under
+`<your vault>/.obsidian/plugins/keep-style-checklists/`, then enable the plugin under
 **Settings → Community plugins**.
 
 ## Limitations
