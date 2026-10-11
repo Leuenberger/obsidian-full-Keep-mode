@@ -12,6 +12,10 @@ reminders, quick notes, and checklists that tidy themselves up the way Keep's do
 
 - **Pin and colour buttons** in every note's top bar, in tabs and in the
   board's pop-up. Pinned notes come first on the board.
+- **Notes look like Keep's.** No properties above the text; the note's tags
+  are shown as labels below it, with "Edited …" (hover for when it was
+  created). They're outside the text, so they can't be edited by accident and
+  Ctrl/Cmd+A selects only the text.
 - **Archive** a note from its top bar, with "Undo" in the confirmation, like in
   Keep. Archived notes leave the board and show up in its Archive view. Notes
   tagged `#archived` (as imported from Keep) count as archived too.
@@ -49,6 +53,10 @@ archived state in `keep_archived` and its reminder in `keep_reminder`.
   levels or unlimited in the settings.
 - **Multi-line items line up.** Extra lines of an item (Shift+Enter) and
   wrapped lines start exactly under the item's text.
+- **Checkboxes stay checkboxes.** The cursor never lands inside `- [ ]`, and
+  a selection doesn't turn checkboxes back into brackets. Backspace at the
+  start of an item joins it to the item above, Delete at the end of an item
+  joins the next one, like in Keep.
 - **Undo and redo buttons** in the note's top bar. Ticking an item and its move
   to the bottom are one step, so one undo restores the list.
 
@@ -80,6 +88,8 @@ The checklist features work in any note, with or without the board.
 
 | Setting | Default |
 |---|---|
+| Hide properties | on |
+| Labels and edit date below the note | on |
 | Pin button | on |
 | Colour button | on |
 | Archive button | on |

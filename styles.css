@@ -129,14 +129,16 @@ body.fkm-card-drag-active {
 
 /* ===== Checklists ===== */
 
-/* ----- Drag grip: floats left of the checkbox, taking no space ----- */
+/* ----- Drag grip: floats just left of the checkbox, taking no space -----
+   The plugin measures --fkm-grip-shift so it sits right next to the checkbox, like Keep's. */
 .fkm-grip {
 	position: absolute;
 	display: inline-flex;
 	align-items: center;
-	width: 18px;
+	justify-content: center;
+	width: 20px;
 	height: 1.5em;
-	transform: translateX(-22px);
+	transform: translateX(var(--fkm-grip-shift, -22px));
 	color: var(--text-faint);
 	cursor: grab;
 	opacity: 0;
@@ -146,8 +148,18 @@ body.fkm-card-drag-active {
 }
 
 .fkm-grip svg {
-	width: 14px;
-	height: 14px;
+	width: 20px;
+	height: 20px;
+}
+
+/* A bigger target for fingers. */
+.is-mobile .fkm-grip {
+	width: 24px;
+}
+
+.is-mobile .fkm-grip svg {
+	width: 22px;
+	height: 22px;
 }
 
 .cm-line:hover .fkm-grip,
@@ -233,4 +245,94 @@ body.fkm-card-drag-active {
 .fkm-ghost-child .fkm-ghost-text {
 	text-decoration: line-through;
 	color: var(--text-muted);
+}
+
+/* ===== Keep pop-up on phones =====
+   Obsidian's floating top bar would float over the note inside the pop-up:
+   give it its own row at the top instead, without the sidebar button. */
+.is-mobile .kg-edit-modal .view-header,
+.is-mobile .fkm-new-note-modal .view-header {
+	position: static !important;
+	transform: none !important;
+	display: flex;
+	justify-content: flex-end;
+	height: auto;
+	margin: 0 !important;
+	padding: 0 48px 4px 0; /* clear of the pop-up's close button */
+	background: none;
+}
+
+.is-mobile .kg-edit-modal .workspace-leaf-content,
+.is-mobile .fkm-new-note-modal .workspace-leaf-content {
+	padding-top: 0 !important;
+}
+
+.is-mobile .kg-edit-modal .view-header-left,
+.is-mobile .fkm-new-note-modal .view-header-left {
+	display: none;
+}
+
+.is-mobile .kg-edit-modal .view-actions,
+.is-mobile .fkm-new-note-modal .view-actions {
+	max-width: 100%;
+	overflow-x: auto;
+	box-shadow: none;
+	background: none;
+}
+
+/* ===== Keep-style note: no properties above, labels and edit date below ===== */
+body.fkm-hide-properties .markdown-source-view .metadata-container,
+body.fkm-hide-properties .markdown-reading-view .metadata-container {
+	display: none !important; /* Obsidian shows it with a more specific rule */
+}
+
+.fkm-note-footer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	max-width: var(--file-line-width);
+	margin: 24px auto 16px;
+	padding: 0 var(--size-4-2);
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+/* Right under the text: the editor's "scroll past the end" space moves below the footer. */
+.cm-sizer.fkm-has-footer .cm-content {
+	padding-bottom: 0 !important;
+}
+
+.cm-sizer.fkm-has-footer {
+	padding-bottom: 40vh;
+}
+
+.markdown-source-view.is-readable-line-width .fkm-note-footer {
+	width: 100%;
+}
+
+.fkm-labels {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.fkm-label {
+	padding: 2px 10px;
+	border-radius: 12px;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.fkm-label:hover {
+	background: var(--background-modifier-active-hover);
+}
+
+.fkm-edited {
+	margin-inline-start: auto;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
 }

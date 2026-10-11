@@ -151,6 +151,14 @@ def press_tab_on(label):
     """)
 
 
+def key(name, vk, modifiers=0):
+    """A real key press in the focused editor (modifiers: 2 = Ctrl)."""
+    code = name if len(name) > 1 else f"Key{name.upper()}"
+    for kind in ("rawKeyDown", "keyUp"):
+        ob.call("Input.dispatchKeyEvent", type=kind, key=name, code=code, windowsVirtualKeyCode=vk, modifiers=modifiers)
+    time.sleep(0.4)
+
+
 def undo():
     ob.js(PRELUDE + "window.__tcLeaf.view.editor.undo(); await wait(400);")
 
@@ -234,6 +242,16 @@ def frontmatter(name):
 def modal_open():
     return ob.js("return [...document.querySelectorAll('.modal-container .kg-edit-modal')].filter(m => !m.closest('[data-tc-hidden]')).length;")
 
+def scroll_check():
+    open_note("scrolling", "".join(f"Line {i}\n" for i in range(80)) + "\n- [ ] A\n- [ ] B\n- [ ] C\n")
+    ob.js(PRELUDE + "window.__tcLeaf.view.editor.cm.scrollDOM.scrollTop = 1e6; await wait(400);")
+    before = ob.js(PRELUDE + line_el("B") + "el.scrollIntoView({ block: 'center' }); await wait(400); return cm.scrollDOM.scrollTop;")
+    drag("B", 40)
+    after = ob.js("return window.__tcLeaf.view.editor.cm.scrollDOM.scrollTop;")
+    check("dragging an item keeps the note where it is (no jump to the top)",
+          before > 100 and abs(after - before) < 5 and text().endswith("- [ ] A\n\t- [ ] B\n- [ ] C\n"), (before, after, text()[-30:]))
+
+
 # ----- the tests -----------------------------------------------------------------------------
 
 def main():
@@ -314,6 +332,52 @@ def main():
         """)
         all_x = xs["first"] + xs["second"] + xs["third"] + xs["next"]
         check("extra lines and wrapped lines start under the item's text", len(set(all_x)) == 1, xs)
+
+        print("Keep-style editing")
+        open_note("editing", "---\ntags:\n  - Shopping\nkeep_created: 2024-11-10T02:44:02\n---\n- [ ] Alpha\n- [ ] Beta\n→- [x] Gamma\n".replace("→", "\t"))
+        boxes = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc;
+            const out = [];
+            for (const sel of [{ anchor: d.line(7).from }, { anchor: d.line(6).from + 3, head: d.line(8).to }]) {
+                cm.dispatch({ selection: sel }); await wait(250);
+                out.push([...cm.contentDOM.querySelectorAll('.cm-line.HyperMD-task-line')].map(l => l.querySelectorAll('input').length));
+            }
+            return out;""")
+        check("checkboxes stay checkboxes under the cursor and a selection (no raw \"- [ ]\")",
+              boxes == [[1, 1], [1, 1]], boxes)  # (the ticked Gamma is in the ticked section)
+        where = ob.js("""const cm = window.__tcLeaf.view.editor.cm; const l = cm.state.doc.line(7);
+            cm.dispatch({ selection: { anchor: l.from + 1 } }); return cm.state.selection.main.head - l.from;""")
+        check("the cursor can't go into \"- [ ]\": it goes to the item's text", where == 6, where)
+        ob.js("const cm = window.__tcLeaf.view.editor.cm; cm.focus(); cm.dispatch({ selection: { anchor: cm.state.doc.line(7).from + 6 } });")
+        key("ArrowLeft", 37)
+        pos = ob.js("const cm = window.__tcLeaf.view.editor.cm; const h = cm.state.selection.main.head; const l = cm.state.doc.lineAt(h); return [l.number, h - l.from];")
+        check("Left at the start of an item goes to the end of the item above", pos == [6, 11], pos)
+        ob.js("const cm = window.__tcLeaf.view.editor.cm; cm.dispatch({ selection: { anchor: cm.state.doc.line(7).from + 6 } });")
+        key("Backspace", 8)
+        check("Backspace at the start of an item joins it to the item above", text().endswith("- [ ] AlphaBeta\n\t- [x] Gamma\n"), repr(text()))
+        undo()
+        ob.js("const cm = window.__tcLeaf.view.editor.cm; cm.focus(); cm.dispatch({ selection: { anchor: cm.state.doc.line(6).to } });")
+        key("Delete", 46)
+        check("Delete at the end of an item joins the next item's text", text().endswith("- [ ] AlphaBeta\n\t- [x] Gamma\n"), repr(text()))
+        undo()
+        key("a", 65, 2)
+        sel = ob.js("const cm = window.__tcLeaf.view.editor.cm; const s = cm.state.selection.main; return cm.state.sliceDoc(s.from, s.to);")
+        check("Ctrl+A selects the note's text, not its properties", sel == "- [ ] Alpha\n- [ ] Beta\n\t- [x] Gamma\n", repr(sel))
+        foot = ob.js("""const el = window.__tcLeaf.view.contentEl;
+            const mc = el.querySelector('.metadata-container');
+            return { props: mc ? getComputedStyle(mc).display : 'none', footer: el.querySelector('.fkm-note-footer')?.innerText ?? null,
+                     created: el.querySelector('.fkm-edited')?.getAttribute('aria-label') };""")
+        check("properties are hidden; labels and \"Edited\" are shown below the note",
+              foot["props"] == "none" and foot["footer"] and foot["footer"].startswith("Shopping") and "Edited" in foot["footer"]
+              and foot["created"] == "Created 10 Nov 2024".replace("Nov", ob.js("return moment('2024-11-10').format('MMM');")), foot)
+        gap = ob.js("""const l = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.cm-line.HyperMD-task-line');
+            return Math.round(l.querySelector('input').getBoundingClientRect().left - l.querySelector('.fkm-grip').getBoundingClientRect().right);""")
+        check("the grip sits right next to the checkbox", 0 <= gap <= 4, gap)
+
+        # Dragging must not scroll the note (on phones it jumped to the top).
+        if ob.js("return document.visibilityState === 'hidden';"):
+            print("  skipped: the scrolling check (the Obsidian window is hidden)")
+        else:
+            scroll_check()
 
         print("Settings and opt-out")
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})

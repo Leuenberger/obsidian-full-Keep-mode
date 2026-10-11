@@ -25,7 +25,7 @@
 
 const obsidian = require("obsidian");
 const { EditorView, Decoration, WidgetType, ViewPlugin, keymap } = require("@codemirror/view");
-const { StateField, StateEffect, Annotation, Prec } = require("@codemirror/state");
+const { EditorState, EditorSelection, StateField, StateEffect, Annotation, Prec } = require("@codemirror/state");
 
 const DEFAULT_SETTINGS = {
 	sinkTicked: true, // move ticked items below the divider
@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS = {
 	alignExtraLines: true,
 	undoButtons: true,
 	// notes and board
+	hideProperties: true, // like Keep: no properties above the note
+	noteFooter: true, // labels and "Edited ..." below the note
 	pinButton: true,
 	colorButton: true,
 	archiveButton: true,
@@ -54,6 +56,7 @@ const COLOR_PROPERTY = "keep_color";
 const ORDER_PROPERTY = "keep_order"; // position on the board; higher = further up
 const ARCHIVE_PROPERTY = "keep_archived"; // true = archived (the tag #archived counts too)
 const REMINDER_PROPERTY = "keep_reminder"; // local date and time, "YYYY-MM-DDTHH:mm"
+const CREATED_PROPERTY = "keep_created"; // when the note was created in Keep (imported notes)
 const ARCHIVE_TAG = "archived";
 const KEEP_VIEW_PLUGIN = "keep-bases-view";
 const COLORS = [
@@ -241,11 +244,52 @@ function writeItems(view, block, items, unit) {
 	const from = doc.line(block.fromLine).from;
 	const to = doc.line(block.toLine).to;
 	const insert = items.map(item => renderItem(item, unit)).join("\n");
-	if (insert === doc.sliceString(from, to)) return false;
+	const old = doc.sliceString(from, to);
+	if (insert === old) return false;
+	// Change only the part that differs, so the lines around it stay as they are.
+	let start = 0;
+	while (start < old.length && start < insert.length && old[start] === insert[start]) start++;
+	let end = 0;
+	while (end < old.length - start && end < insert.length - start
+		&& old[old.length - 1 - end] === insert[insert.length - 1 - end]) end++;
+	const restoreScroll = keepScroll(view);
 	// No user event: right after a tick, undo history merges this with the tick
 	// itself, so one undo restores the list exactly.
-	view.dispatch({ changes: { from, to, insert }, annotations: ownEdit.of(true) });
+	view.dispatch({
+		changes: { from: from + start, to: to - end, insert: insert.slice(start, insert.length - end) },
+		annotations: ownEdit.of(true),
+	});
+	restoreScroll();
 	return true;
+}
+
+// Remember where the note (and anything around it that scrolls, like the Keep
+// pop-up) is scrolled to; the returned function scrolls everything back there,
+// now and once the browser has drawn the change. Phones otherwise jump to the top.
+function keepScroll(view) {
+	const saved = [];
+	for (let el = view.scrollDOM; el; el = el.parentElement) {
+		if (el.scrollHeight > el.clientHeight) saved.push([el, el.scrollTop]);
+	}
+	const restore = () => saved.forEach(([el, top]) => {
+		if (el.scrollTop !== top) el.scrollTop = top;
+	});
+	return () => {
+		restore();
+		requestAnimationFrame(() => {
+			restore();
+			requestAnimationFrame(restore);
+		});
+	};
+}
+
+// Where the note's text starts: after the properties (front matter), if any.
+function bodyStart(doc) {
+	if (doc.lines < 2 || doc.line(1).text !== "---") return 0;
+	for (let n = 2; n <= doc.lines; n++) {
+		if (/^(---|\.\.\.)\s*$/.test(doc.line(n).text)) return n < doc.lines ? doc.line(n + 1).from : doc.length;
+	}
+	return 0;
 }
 
 // ----- the editor extension -----------------------------------------------------------------
@@ -288,6 +332,39 @@ function checklistExtension(plugin) {
 			obsidian.setIcon(el, "grip-vertical");
 			el.addEventListener("pointerdown", event => plugin.startItemDrag(view, el, event));
 			return el;
+		}
+		ignoreEvent() {
+			return true;
+		}
+	}
+
+	// The checkbox, drawn by the plugin in place of "- [ ]" and always shown as a
+	// checkbox, like in Keep: Obsidian would show the raw "- [ ]" whenever the
+	// cursor or a selection touches it.
+	class CheckboxWidget extends WidgetType {
+		constructor(mark) {
+			super();
+			this.mark = mark;
+		}
+		eq(other) {
+			return other.mark === this.mark;
+		}
+		toDOM(view) {
+			const label = createEl("label", { cls: "task-list-label fkm-checkbox" });
+			const box = label.createEl("input", { cls: "task-list-item-checkbox", type: "checkbox" });
+			box.dataset.task = this.mark;
+			box.checked = this.mark !== " ";
+			// Don't move the cursor or focus the editor (no keyboard popping up on phones).
+			label.addEventListener("mousedown", event => event.preventDefault());
+			box.addEventListener("click", event => {
+				event.preventDefault();
+				const pos = view.posAtDOM(label) + 3; // the mark inside "- [ ]"
+				const current = view.state.doc.sliceString(pos, pos + 1);
+				const restoreScroll = keepScroll(view);
+				view.dispatch({ changes: { from: pos, to: pos + 1, insert: current === " " ? "x" : " " }, userEvent: "input" });
+				restoreScroll();
+			});
+			return label;
 		}
 		ignoreEvent() {
 			return true;
@@ -351,9 +428,13 @@ function checklistExtension(plugin) {
 		}
 	}
 
+	// Live Preview (true) or Source mode (false, where the raw "- [ ]" stays).
+	const livePreview = state => (obsidian.editorLivePreviewField ? state.field(obsidian.editorLivePreviewField, false) !== false : true);
+
 	const build = state => {
 		const s = settings();
 		if (!enabledFor(state)) return Decoration.none;
+		const live = livePreview(state);
 		const unit = indentUnit(app);
 		const doc = state.doc;
 		const decos = [];
@@ -401,10 +482,12 @@ function checklistExtension(plugin) {
 				if (hidden.has(i)) return;
 				const depth = Math.min(item.depth, MAX_STYLED_DEPTH);
 				const head = doc.line(item.line);
+				const boxFrom = head.from + item.indent.length;
 				if (s.dragHandles) {
 					// After the indentation, so the grip floats right next to the checkbox.
-					decos.push(Decoration.widget({ widget: new GripWidget(), side: -1 }).range(head.from + item.indent.length));
+					decos.push(Decoration.widget({ widget: new GripWidget(), side: -1 }).range(boxFrom));
 				}
+				if (live) decos.push(Decoration.replace({ widget: new CheckboxWidget(item.mark) }).range(boxFrom, boxFrom + 5));
 				if (!s.alignExtraLines) return;
 				// Wrapped lines of the item hang exactly under its text.
 				decos.push(Decoration.line({ class: `fkm-task fkm-depth-${depth}` }).range(head.from));
@@ -442,9 +525,90 @@ function checklistExtension(plugin) {
 
 	const decorations = StateField.define({
 		create: state => build(state),
-		update: (decos, tr) => (tr.docChanged || tr.effects.some(e => e.is(refreshEffect)) ? build(tr.state) : decos),
-		provide: field => EditorView.decorations.from(field),
+		update: (decos, tr) => (tr.docChanged || tr.effects.some(e => e.is(refreshEffect))
+			|| livePreview(tr.startState) !== livePreview(tr.state) ? build(tr.state) : decos),
+		// The checkboxes (and the hidden ticked sub-items) count as one character for the cursor.
+		// Top priority, so the checkbox wins over Obsidian's own drawing of "- [ ]".
+		provide: field => [Prec.highest(EditorView.decorations.from(field)), EditorView.atomicRanges.of(view => view.state.field(field))],
 	});
+
+	// Like Keep, the cursor never goes into "- [ ]": a click or arrow key that would
+	// put it there puts it at the start of the item's text instead, and Left at the
+	// start of an item's text goes to the end of the line above.
+	const prefixEnd = line => {
+		const m = TASK_RE.exec(line.text);
+		return m ? Math.min(line.from + m[1].length + 6, line.to) : null;
+	};
+	const keepCursorOut = EditorState.transactionFilter.of(tr => {
+		if (!tr.selection || !livePreview(tr.state) || !enabledFor(tr.state)) return tr;
+		const doc = tr.newDoc;
+		const start = bodyStart(doc);
+		const oldHead = tr.startState.selection.main.head;
+		const byKey = !tr.docChanged && tr.isUserEvent("select") && !tr.isUserEvent("select.pointer");
+		let changed = false;
+		const fix = pos => {
+			const line = doc.lineAt(pos);
+			const end = prefixEnd(line);
+			if (end === null || pos >= end) return pos;
+			changed = true;
+			// Left from the start of the text: to the end of the line above.
+			if (byKey && oldHead === end && pos === end - 1 && line.from > start) return line.from - 1;
+			return end;
+		};
+		// Only a plain cursor: a selection may start at a line's start (the checkbox stays drawn anyway).
+		const ranges = tr.selection.ranges.map(r => (r.empty ? EditorSelection.cursor(fix(r.head, true)) : r));
+		if (!changed) return tr;
+		return [tr, { selection: EditorSelection.create(ranges, tr.selection.mainIndex), sequential: true }];
+	});
+
+	// Keep-style keys in checklists:
+	//  - Backspace at the start of an item's text joins it to the line above
+	//    (an empty item disappears), instead of breaking up the "- [ ]".
+	//  - Delete at the end of a line joins the next item's text to it.
+	//  - Ctrl/Cmd+A selects the note's text, not its properties.
+	const keepKeys = Prec.highest(keymap.of([
+		{
+			key: "Backspace",
+			run: view => {
+				const { state } = view;
+				const sel = state.selection.main;
+				if (state.selection.ranges.length > 1 || !sel.empty || !livePreview(state) || !enabledFor(state)) return false;
+				const line = state.doc.lineAt(sel.head);
+				if (prefixEnd(line) !== sel.head) return false;
+				if (line.from <= bodyStart(state.doc)) return true; // the very first item: nothing to join to
+				view.dispatch({ changes: { from: line.from - 1, to: sel.head }, selection: { anchor: line.from - 1 }, userEvent: "delete.backward", scrollIntoView: true });
+				return true;
+			},
+		},
+		{
+			key: "Delete",
+			run: view => {
+				const { state } = view;
+				const sel = state.selection.main;
+				if (state.selection.ranges.length > 1 || !sel.empty || !livePreview(state) || !enabledFor(state)) return false;
+				const line = state.doc.lineAt(sel.head);
+				if (sel.head !== line.to || line.number >= state.doc.lines) return false;
+				const next = state.doc.line(line.number + 1);
+				const end = prefixEnd(next);
+				if (end === null) return false;
+				view.dispatch({ changes: { from: line.to, to: end }, userEvent: "delete.forward" });
+				return true;
+			},
+		},
+		{
+			key: "Mod-a",
+			run: view => {
+				const from = bodyStart(view.state.doc);
+				if (!from) return false;
+				const to = view.state.doc.length;
+				const sel = view.state.selection.main;
+				// A second Ctrl+A selects everything, as usual.
+				if (sel.from === from && sel.to === to) return false;
+				view.dispatch({ selection: { anchor: from, head: to }, userEvent: "select" });
+				return true;
+			},
+		},
+	]));
 
 	// Ticking or unticking an item (same line, only the tick changed): tick its
 	// sub-items along, and move it to its place - like Keep.
@@ -510,11 +674,14 @@ function checklistExtension(plugin) {
 			this.timers.forEach(clearTimeout);
 		}
 		measure(view) {
-			if (!settings().alignExtraLines) return;
 			view.requestMeasure({
 				key: this,
 				read: v => this.read(v),
-				write: (found, v) => {
+				write: ({ gripShift, ...found }, v) => {
+					if (gripShift !== null && gripShift !== this.gripShift) {
+						this.gripShift = gripShift;
+						v.dom.style.setProperty("--fkm-grip-shift", `${gripShift}px`);
+					}
 					for (const [depth, { hang, spacer }] of Object.entries(found)) {
 						const old = this.values[depth] ?? {};
 						if (old.hang !== hang) v.dom.style.setProperty(`--fkm-hang-${depth}`, `${hang}px`);
@@ -561,6 +728,15 @@ function checklistExtension(plugin) {
 			};
 			const hangs = {};
 			const spacerStarts = {};
+			// The grip sits just left of the checkbox: how far to move it from where it starts.
+			let gripShift = null;
+			const grip = v.contentDOM.querySelector(".fkm-grip");
+			const box = grip?.closest(".cm-line")?.querySelector(".task-list-item-checkbox");
+			if (grip && box) {
+				const current = parseFloat(v.dom.style.getPropertyValue("--fkm-grip-shift")) || 0;
+				const gripRect = grip.getBoundingClientRect();
+				gripShift = Math.round(box.getBoundingClientRect().left - (gripRect.left - current) - gripRect.width - 2);
+			}
 			for (const block of findBlocks(doc, unit)) {
 				for (const item of block.items) {
 					const depth = Math.min(item.depth, MAX_STYLED_DEPTH);
@@ -582,7 +758,7 @@ function checklistExtension(plugin) {
 					}
 				}
 			}
-			const found = {};
+			const found = { gripShift };
 			for (const [depth, hang] of Object.entries(hangs)) {
 				const start = spacerStarts[depth];
 				found[depth] = { hang, spacer: start === undefined ? null : Math.max(0, Math.round(hang - start)) };
@@ -630,7 +806,7 @@ function checklistExtension(plugin) {
 		}
 	});
 
-	return [decorations, onTick, hangMeasure, tabKey, headerButtons];
+	return [decorations, keepCursorOut, keepKeys, onTick, hangMeasure, tabKey, headerButtons];
 }
 
 // ----- settings tab -------------------------------------------------------------------------
@@ -658,6 +834,8 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 					+ "Then use the command \"Create a Keep board\".",
 			});
 		}
+		toggle("Hide properties", "Like Keep, notes don't show their properties above the text. (They stay in the note; see them in Obsidian's \"File properties\" side panel.)", "hideProperties");
+		toggle("Labels and edit date below the note", "Like Keep: the note's tags as labels, and when it was last edited (hover for when it was created).", "noteFooter");
 		toggle("Pin button", "A pin in each note's top bar. Pinned notes are shown first on the board.", "pinButton");
 		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
 		toggle("Archive button", `A button in each note's top bar that archives the note (property "${ARCHIVE_PROPERTY}"), with Undo. The board hides archived notes; they are in its Archive view.`, "archiveButton");
@@ -703,6 +881,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.pinButtons = new Map(); // MarkdownView -> its pin button
 		this.archiveButtons = new Map();
 		this.reminderButtons = new Map();
+		this.footerViews = new Set();
+		this.applyBodyClasses();
 		this.boardListeners = []; // functions that remove the board listeners
 		this.registerEditorExtension(checklistExtension(this));
 		this.addSettingTab(new FullKeepModeSettingTab(this.app, this));
@@ -756,6 +936,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.pinButtons.clear();
 		this.archiveButtons.clear();
 		this.reminderButtons.clear();
+		this.footerViews.clear();
+		// Open notes get their buttons again when the plugin is turned back on.
+		this.app.workspace.iterateAllLeaves(leaf => {
+			if (leaf.view?.fullKeepModeButtons === this) delete leaf.view.fullKeepModeButtons;
+		});
+		document.body.removeClass("fkm-hide-properties");
+		document.querySelectorAll(".fkm-note-footer").forEach(el => el.remove());
+		document.querySelectorAll(".fkm-has-footer").forEach(el => el.removeClass("fkm-has-footer"));
 		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
 		this.boardObserver?.disconnect();
 		this.boardListeners.forEach(remove => remove());
@@ -771,6 +959,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.applyBodyClasses();
+		this.renderButtons();
 		this.refreshEditors();
 	}
 
@@ -794,10 +984,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 	// Buttons in a note's top bar: undo, redo, pin, colour (like Keep's note editor).
 	addHeaderButtons(view) {
-		if (view.fullKeepModeButtons) return;
-		view.fullKeepModeButtons = true;
+		// Once per view and plugin instance (a reloaded plugin adds its buttons again);
+		// never for an instance that has been unloaded.
+		if (view.fullKeepModeButtons === this || !this._loaded) return;
+		view.fullKeepModeButtons = this;
 		const s = this.settings;
 		const added = [];
+		this.footerViews.add(view);
+		setTimeout(() => this.renderFooter(view), 0);
 		// addAction puts each new button in front, so add them right to left:
 		// undo, redo, pin, reminder, colour, archive.
 		if (s.archiveButton) {
@@ -841,7 +1035,10 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			this.pinButtons.delete(view);
 			this.archiveButtons.delete(view);
 			this.reminderButtons.delete(view);
-			delete view.fullKeepModeButtons;
+			this.footerViews.delete(view);
+			view.contentEl.querySelectorAll(".fkm-note-footer").forEach(el => el.remove());
+			view.contentEl.querySelectorAll(".fkm-has-footer").forEach(el => el.removeClass("fkm-has-footer"));
+			if (view.fullKeepModeButtons === this) delete view.fullKeepModeButtons;
 		});
 	}
 
@@ -850,6 +1047,64 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		for (const [view, button] of this.pinButtons) if (!file || view.file === file) this.renderPin(view, button);
 		for (const [view, button] of this.archiveButtons) if (!file || view.file === file) this.renderArchive(view, button);
 		for (const [view, button] of this.reminderButtons) if (!file || view.file === file) this.renderReminder(view, button);
+		for (const view of this.footerViews) if (!file || view.file === file) this.renderFooter(view);
+	}
+
+	// ----- below the note: labels and "Edited ..." (like Keep) ---------------------------------
+
+	// Outside the editor's text, so it can't be edited by accident and Ctrl+A doesn't select it.
+	renderFooter(view) {
+		const sizer = view.contentEl.querySelector(".markdown-source-view .cm-sizer");
+		const old = sizer?.querySelector(":scope > .fkm-note-footer");
+		const file = view.file;
+		if (!this.settings.noteFooter || !sizer || !(file instanceof obsidian.TFile) || file.extension !== "md") {
+			old?.remove();
+			sizer?.removeClass("fkm-has-footer");
+			return;
+		}
+		sizer.addClass("fkm-has-footer");
+		const footer = old ?? createDiv({ cls: "fkm-note-footer" });
+		if (!old) {
+			const content = sizer.querySelector(":scope > .cm-contentContainer");
+			if (content) content.after(footer);
+			else sizer.appendChild(footer);
+		}
+		footer.empty();
+		const cache = this.app.metadataCache.getFileCache(file) ?? {};
+		const fm = cache.frontmatter ?? {};
+		// Labels: the note's tags (from its properties), except "archived".
+		const tags = [...new Set((obsidian.parseFrontMatterTags(fm) ?? []).map(tag => tag.replace(/^#/, "")))]
+			.filter(tag => tag.toLowerCase() !== ARCHIVE_TAG);
+		if (tags.length) {
+			const labels = footer.createDiv({ cls: "fkm-labels" });
+			for (const tag of tags) {
+				const chip = labels.createSpan({ cls: "fkm-label", text: tag });
+				chip.addEventListener("click", () => this.searchTag(tag));
+			}
+		}
+		const edited = obsidian.moment(file.stat.mtime);
+		const createdValue = fm[CREATED_PROPERTY];
+		const created = createdValue ? obsidian.moment(String(createdValue)) : obsidian.moment(file.stat.ctime);
+		const info = footer.createDiv({ cls: "fkm-edited", text: `Edited ${this.keepDate(edited)}` });
+		if (created.isValid()) info.setAttribute("aria-label", `Created ${this.keepDate(created)}`);
+	}
+
+	// Keep's short dates: "14:05" today, "10 Nov" this year, "10 Nov 2024" before.
+	keepDate(time) {
+		const now = obsidian.moment();
+		if (time.isSame(now, "day")) return time.format("HH:mm");
+		if (time.isSame(now, "year")) return time.format("D MMM");
+		return time.format("D MMM YYYY");
+	}
+
+	// A click on a label: all notes with it, in Obsidian's search.
+	searchTag(tag) {
+		const search = this.app.internalPlugins?.getPluginById?.("global-search")?.instance;
+		search?.openGlobalSearch?.(`tag:#${tag}`);
+	}
+
+	applyBodyClasses() {
+		document.body.toggleClass("fkm-hide-properties", this.settings.hideProperties);
 	}
 
 	// ----- archive --------------------------------------------------------------------------
