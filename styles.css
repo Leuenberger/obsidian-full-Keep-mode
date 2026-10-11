@@ -85,6 +85,84 @@ button.fkm-reminder-remove {
 	color: var(--text-faint);
 }
 
+.fkm-take-note-text {
+	flex: 1;
+}
+
+/* The "New list" icon at the right end of the bar, like Keep's. */
+.fkm-take-note-list {
+	display: flex;
+	color: var(--text-muted);
+}
+
+/* The search bar above it, always visible like Keep's. */
+.fkm-search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	max-width: 600px;
+	margin: 16px auto 0;
+	padding: 6px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+}
+
+.fkm-search:focus-within {
+	background: var(--background-primary);
+	box-shadow: var(--shadow-s);
+}
+
+.fkm-search input {
+	flex: 1;
+	min-width: 0;
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	padding: 4px 0;
+	font-size: var(--font-ui-medium);
+}
+
+.fkm-search-icon {
+	display: flex;
+}
+
+.fkm-search-clear {
+	display: none;
+}
+
+.fkm-search-clear.is-visible {
+	display: flex;
+}
+
+/* The label (or "Reminders") the board is showing, with an x to show all notes again. */
+.fkm-search-chip {
+	display: none;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 12px;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.fkm-search-chip.is-active {
+	display: inline-flex;
+}
+
+.fkm-search-chip-x {
+	display: flex;
+}
+
+.fkm-search-chip-x svg {
+	width: 12px;
+	height: 12px;
+}
+
 /* Dragging cards. */
 .kg-card.fkm-dragging {
 	opacity: 0.4;
@@ -254,6 +332,8 @@ body.fkm-card-drag-active {
 .is-mobile .fkm-new-note-modal .view-header {
 	position: static !important;
 	transform: none !important;
+	opacity: 1 !important; /* Obsidian fades it out while scrolling; Keep's stays */
+	transition: none !important;
 	display: flex;
 	justify-content: flex-end;
 	height: auto;
@@ -335,4 +415,102 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 	margin-inline-start: auto;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
+}
+
+/* ===== Labels: the side menu, the picker, and "+" below the note ===== */
+.fkm-labels-view {
+	padding: 8px 0 !important;
+}
+
+.fkm-labels-item {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	margin-inline-end: 8px;
+	padding: 8px 16px;
+	border-radius: 0 20px 20px 0;
+	cursor: pointer;
+	color: var(--text-normal);
+}
+
+.fkm-labels-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.fkm-labels-item.is-active {
+	background: rgba(var(--color-yellow-rgb, 255, 234, 0), 0.35);
+	font-weight: var(--font-semibold);
+}
+
+.fkm-labels-icon {
+	display: flex;
+	color: var(--text-muted);
+}
+
+.fkm-labels-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.fkm-labels-heading {
+	margin: 12px 16px 4px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.fkm-labels-separator {
+	margin: 8px 0;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.fkm-label-add {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--text-muted);
+	background: transparent;
+	border: 1px dashed var(--background-modifier-border);
+}
+
+.fkm-label-add-icon {
+	display: flex;
+}
+
+.fkm-label-add-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+.fkm-label-modal {
+	width: min(360px, 92vw);
+}
+
+.fkm-label-input {
+	width: 100%;
+	margin-bottom: 8px;
+}
+
+.fkm-label-list {
+	max-height: 50vh;
+	overflow-y: auto;
+}
+
+.fkm-label-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 4px;
+	cursor: pointer;
+}
+
+.fkm-label-create {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 4px;
+	color: var(--text-accent);
+	cursor: pointer;
 }

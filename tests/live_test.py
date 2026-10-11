@@ -369,6 +369,12 @@ def main():
         check("properties are hidden; labels and \"Edited\" are shown below the note",
               foot["props"] == "none" and foot["footer"] and foot["footer"].startswith("Shopping") and "Edited" in foot["footer"]
               and foot["created"] == "Created 10 Nov 2024".replace("Nov", ob.js("return moment('2024-11-10').format('MMM');")), foot)
+        ob.js(PRELUDE + """window.__tcLeaf.view.contentEl.querySelector('.fkm-label-add').click(); await wait(400);
+            const input = document.querySelector('.fkm-label-modal .fkm-label-input');
+            input.value = 'Errands'; input.dispatchEvent(new Event('input'));
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await wait(800);""")
+        key("Escape", 27)  # closes the label pop-up
+        check("the label button below the note adds a new label", frontmatter("editing").get("tags") == ["Shopping", "Errands"], frontmatter("editing"))
         gap = ob.js("""const l = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.cm-line.HyperMD-task-line');
             return Math.round(l.querySelector('input').getBoundingClientRect().left - l.querySelector('.fkm-grip').getBoundingClientRect().right);""")
         check("the grip sits right next to the checkbox", 0 <= gap <= 4, gap)
@@ -378,6 +384,13 @@ def main():
             print("  skipped: the scrolling check (the Obsidian window is hidden)")
         else:
             scroll_check()
+
+        open_note("plain", "Milk\nBread\n")
+        ob.js(PRELUDE + "await app.plugins.plugins['full-keep-mode'].setCheckboxes(window.__tcLeaf.view.file, true); await wait(500);")
+        on = text()
+        ob.js(PRELUDE + "await app.plugins.plugins['full-keep-mode'].setCheckboxes(window.__tcLeaf.view.file, false); await wait(500);")
+        check("\"Show checkboxes\" turns lines into a checklist, \"Hide checkboxes\" back",
+              on == "- [ ] Milk\n- [ ] Bread\n" and text() == "Milk\nBread\n", (on, text()))
 
         print("Settings and opt-out")
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})
@@ -453,6 +466,32 @@ def main():
             kept = ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(path)}); return f ? await app.vault.read(f) : null;")
             check("…and kept when it has text", kept == "Milk", kept)
             ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(path)}); if (f) await app.vault.trash(f, true);")
+
+            # Search bar, labels and "New list".
+            order = ob.js("""const el = window.__fkmBoard.view.containerEl;
+                return [...el.querySelectorAll('.kg-container > .fkm-search, .kg-container > .fkm-take-note')].map(e => e.className);""")
+            check("an always-visible search bar above \"Take a note…\"", order == ["fkm-search", "fkm-take-note"], order)
+            ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card C.md');
+                await app.vault.modify(f, (await app.vault.read(f)) + 'A zebra crossing\\n'); await wait(800);
+                const input = window.__fkmBoard.view.containerEl.querySelector('.fkm-search input');
+                input.value = 'zebra'; input.dispatchEvent(new Event('input')); await wait(1500);""")
+            check("searching finds notes by their text", card_order() == ["Card C"], card_order())
+            ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-search-clear').click(); await wait(1500);")
+            check("…and clearing the search shows all again", len(card_order()) == 3, card_order())
+            ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
+                await p.setLabel(app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'), 'Fruit', true); await wait(800);
+                app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true });
+                await p.showOnBoard('label:Fruit'); await wait(1500);""")
+            chip = ob.js("return window.__fkmBoard.view.containerEl.querySelector('.fkm-search-chip')?.innerText ?? null;")
+            check("a label shows only its notes, named in the search bar", card_order() == ["Card A"] and chip == "Fruit", (card_order(), chip))
+            ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note-list').click(); await wait(1500);")
+            new_text = ob.js("""const f = app.vault.getMarkdownFiles().sort((a, b) => b.stat.ctime - a.stat.ctime)[0];
+                return await app.vault.read(f);""")
+            boxes = ob.js("return document.querySelectorAll('.fkm-new-note-modal input.task-list-item-checkbox').length;")
+            check("\"New list\" starts a checklist, with the label shown", new_text == '---\ntags:\n  - "Fruit"\n---\n- [ ] ' and boxes == 1, (new_text, boxes))
+            press_escape()
+            ob.js(PRELUDE + "await app.plugins.plugins['full-keep-mode'].showOnBoard('notes'); await wait(1200);")
+            check("\"Notes\" shows all notes again", len(card_order()) == 3, card_order())
             ob.js("window.__fkmBoard.detach();")
 
         print("Archive and reminders")

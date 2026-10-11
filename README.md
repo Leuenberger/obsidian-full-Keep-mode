@@ -23,8 +23,15 @@ reminders, quick notes, and checklists that tidy themselves up the way Keep's do
   today, tomorrow, next week) or any date and time. When a reminder is due, a
   notice pops up in Obsidian, plus a system notification on desktop. Reminders
   that fell due while Obsidian was closed are shown when you open it.
+- **Search bar** always at the top of the board, like Keep's. It finds notes by
+  title, label and text.
+- **Labels side menu**, like Keep's: Notes, Reminders, your labels and Archive
+  in the left sidebar (the drawer on phones). Click one to show it on the board.
+- **Labels on a note**: the pencil/"+ Label" button below the note (or "Labels"
+  in the note's ⋮ menu) opens Keep's "Label note": tick labels or type a new one.
 - **"Take a note…"** at the top of the board opens a new note in a pop-up, title
-  ready to type. Close it without writing anything and it's thrown away, like in
+  ready to type. The checkbox icon at its right end starts a **new list**
+  instead. A note taken while the board shows a label gets that label. Close it without writing anything and it's thrown away, like in
   Keep.
 - **Drag cards** to reorder the board: with the mouse, or hold a card and drag
   it on a phone or tablet. A dragged card takes the place of the card you drop
@@ -57,6 +64,8 @@ archived state in `keep_archived` and its reminder in `keep_reminder`.
   a selection doesn't turn checkboxes back into brackets. Backspace at the
   start of an item joins it to the item above, Delete at the end of an item
   joins the next one, like in Keep.
+- **Show / hide checkboxes** (in the note's ⋮ menu), like Keep: turns the
+  note's lines into a checklist and back.
 - **Undo and redo buttons** in the note's top bar. Ticking an item and its move
   to the bottom are one step, so one undo restores the list.
 
@@ -95,6 +104,8 @@ The checklist features work in any note, with or without the board.
 | Archive button | on |
 | Reminders | on |
 | "Take a note…" bar | on |
+| Search bar | on |
+| Labels side menu | on |
 | Drag cards | on |
 | Move ticked items down | on |
 | Ticked sub-items under a ghost parent | on |
@@ -107,8 +118,10 @@ The checklist features work in any note, with or without the board.
 To keep the checklist features out of a single note, give it the property
 `full-keep-mode: false`.
 
-Commands: **Take a note**, **Create a Keep board**, and **Move ticked items
-down in this note** (tidies up a list that already has ticked items in between).
+Commands: **Take a note**, **Take a note as a checklist**, **Labels of this
+note**, **Show or hide checkboxes in this note**, **Open the labels side menu**,
+**Create a Keep board**, and **Move ticked items down in this note** (tidies up
+a list that already has ticked items in between).
 
 ## Installation
 
@@ -128,7 +141,8 @@ Manually: download `main.js`, `manifest.json` and `styles.css` from the
   levels; Tab and dragging are.
 - Reminders pop up only while Obsidian is running (missed ones are shown when
   it opens). Obsidian can't wake a phone the way Keep's reminders do.
-- Not yet: labels on the board.
+- Labels are tags in the note's properties; Obsidian tags can't contain spaces,
+  so a new label "Book club" becomes "Book-club".
 
 ## Development
 

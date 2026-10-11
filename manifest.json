@@ -1,9 +1,9 @@
 {
 	"id": "full-keep-mode",
 	"name": "Full Keep Mode",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"minAppVersion": "1.5.0",
-	"description": "The Google Keep experience in Obsidian: pin, colour and archive notes, set reminders, take notes and drag cards on a Keep-style board, and checklists where ticked items move down and items can be dragged and indented.",
+	"description": "The Google Keep experience in Obsidian: a Keep board with search, labels and a side menu, pin, colour, archive and reminders, quick notes and lists, and checklists where ticked items move down and items can be dragged and indented.",
 	"author": "Gabriel Leuenberger",
 	"authorUrl": "https://github.com/Leuenberger",
 	"isDesktopOnly": false

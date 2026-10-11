@@ -43,6 +43,8 @@ const DEFAULT_SETTINGS = {
 	archiveButton: true,
 	reminders: true,
 	takeANote: true,
+	searchBar: true, // always-visible search bar on the board
+	labelsSidebar: true, // Keep's side menu: Notes, Reminders, labels, Archive
 	dragCards: true,
 	firedReminders: {}, // path -> reminder time already shown (so each one fires once)
 };
@@ -59,6 +61,7 @@ const REMINDER_PROPERTY = "keep_reminder"; // local date and time, "YYYY-MM-DDTH
 const CREATED_PROPERTY = "keep_created"; // when the note was created in Keep (imported notes)
 const ARCHIVE_TAG = "archived";
 const KEEP_VIEW_PLUGIN = "keep-bases-view";
+const LABELS_VIEW = "full-keep-mode-labels";
 const COLORS = [
 	{ id: null, name: "Default" },
 	{ id: "red", name: "Red", hex: "#f28b82" },
@@ -88,7 +91,6 @@ views:
         - '${ARCHIVE_PROPERTY} == true'
     order:
       - file.name
-      - file.tags
       - note.${REMINDER_PROPERTY}
     sort:
       - property: ${PIN_PROPERTY}
@@ -103,7 +105,6 @@ views:
         - '${ARCHIVE_PROPERTY} == true'
     order:
       - file.name
-      - file.tags
     sort:
       - property: file.mtime
         direction: DESC
@@ -331,6 +332,18 @@ function checklistExtension(plugin) {
 			const el = createSpan({ cls: "fkm-grip" });
 			obsidian.setIcon(el, "grip-vertical");
 			el.addEventListener("pointerdown", event => plugin.startItemDrag(view, el, event));
+			// Phones: no tap-to-focus, no click and no scrolling from touching the grip
+			// (focusing the editor made iOS jump to the cursor, often at the top).
+			// Nor does a sideways drag open Obsidian's sidebar (swipe from the left).
+			const stop = event => {
+				if (event.cancelable) event.preventDefault();
+				event.stopPropagation();
+			};
+			el.addEventListener("touchstart", stop, { passive: false });
+			el.addEventListener("touchmove", stop, { passive: false });
+			el.addEventListener("touchend", stop, { passive: false });
+			el.addEventListener("mousedown", stop);
+			el.addEventListener("click", stop);
 			return el;
 		}
 		ignoreEvent() {
@@ -840,6 +853,8 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
 		toggle("Archive button", `A button in each note's top bar that archives the note (property "${ARCHIVE_PROPERTY}"), with Undo. The board hides archived notes; they are in its Archive view.`, "archiveButton");
 		toggle("Reminders", `A bell in each note's top bar to set a reminder (property "${REMINDER_PROPERTY}"). When it is due, a notice pops up while Obsidian is open; reminders missed while it was closed are shown when it opens.`, "reminders");
+		toggle("Search bar", "Always shown at the top of the board, like Keep's. Finds notes by title, label and text.", "searchBar");
+		toggle("Labels side menu", "Notes, Reminders, your labels and Archive in the left sidebar, like Keep's menu. Click one to show it on the board.", "labelsSidebar");
 		toggle("\"Take a note…\" bar", "On the board: opens a new note in the pop-up. A new note closed without any text is thrown away, like in Keep.", "takeANote");
 		toggle("Drag cards", "Drag cards on the board to reorder them. On a phone: hold a card, then drag it.", "dragCards");
 
@@ -898,10 +913,56 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			callback: () => this.newNote(),
 		});
 		this.addCommand({
+			id: "new-list",
+			name: "Take a note as a checklist",
+			callback: () => this.newNote({ list: true }),
+		});
+		this.addCommand({
+			id: "labels",
+			name: "Labels of this note",
+			checkCallback: checking => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== "md") return false;
+				if (!checking) new LabelModal(this, file).open();
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "toggle-checkboxes",
+			name: "Show or hide checkboxes in this note",
+			checkCallback: checking => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== "md") return false;
+				if (!checking) void this.setCheckboxes(file, !this.hasCheckboxes(file));
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "open-labels",
+			name: "Open the labels side menu",
+			callback: () => void this.openLabelsView(),
+		});
+		this.addCommand({
 			id: "create-board",
 			name: "Create a Keep board",
 			callback: () => this.createBoard(),
 		});
+
+		// Keep's side menu, and its entries in the note's "⋮" menu.
+		this.registerView(LABELS_VIEW, leaf => new LabelsView(leaf, this));
+		this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+			if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
+			menu.addItem(item => item.setTitle("Labels").setIcon("tag").setSection("action")
+				.onClick(() => new LabelModal(this, file).open()));
+			const has = this.hasCheckboxes(file);
+			menu.addItem(item => item.setTitle(has ? "Hide checkboxes" : "Show checkboxes").setIcon("square-check-big").setSection("action")
+				.onClick(() => void this.setCheckboxes(file, !has)));
+		}));
+		this.app.workspace.onLayoutReady(() => {
+			if (this.settings.labelsSidebar) void this.openLabelsView(false);
+		});
+		const relabel = obsidian.debounce(() => this.labelsView()?.render(), 1000, true);
+		this.registerEvent(this.app.metadataCache.on("changed", () => relabel()));
 
 		// Keep the top-bar icons in step when a note is changed elsewhere (e.g. on the board).
 		this.registerEvent(this.app.metadataCache.on("changed", file => this.renderButtons(file)));
@@ -1075,13 +1136,17 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		// Labels: the note's tags (from its properties), except "archived".
 		const tags = [...new Set((obsidian.parseFrontMatterTags(fm) ?? []).map(tag => tag.replace(/^#/, "")))]
 			.filter(tag => tag.toLowerCase() !== ARCHIVE_TAG);
-		if (tags.length) {
-			const labels = footer.createDiv({ cls: "fkm-labels" });
-			for (const tag of tags) {
-				const chip = labels.createSpan({ cls: "fkm-label", text: tag });
-				chip.addEventListener("click", () => this.searchTag(tag));
-			}
+		const labels = footer.createDiv({ cls: "fkm-labels" });
+		for (const tag of tags) {
+			const chip = labels.createSpan({ cls: "fkm-label", text: tag });
+			chip.setAttribute("aria-label", "Show all notes with this label");
+			chip.addEventListener("click", () => void this.showOnBoard(`label:${tag}`));
 		}
+		// Add or remove labels, like Keep's "Add label".
+		const add = labels.createSpan({ cls: "fkm-label fkm-label-add", attr: { "aria-label": "Labels" } });
+		obsidian.setIcon(add.createSpan({ cls: "fkm-label-add-icon" }), tags.length ? "pencil" : "plus");
+		if (!tags.length) add.createSpan({ text: "Label" });
+		add.addEventListener("click", () => new LabelModal(this, file).open());
 		const edited = obsidian.moment(file.stat.mtime);
 		const createdValue = fm[CREATED_PROPERTY];
 		const created = createdValue ? obsidian.moment(String(createdValue)) : obsidian.moment(file.stat.ctime);
@@ -1095,12 +1160,6 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		if (time.isSame(now, "day")) return time.format("HH:mm");
 		if (time.isSame(now, "year")) return time.format("D MMM");
 		return time.format("D MMM YYYY");
-	}
-
-	// A click on a label: all notes with it, in Obsidian's search.
-	searchTag(tag) {
-		const search = this.app.internalPlugins?.getPluginById?.("global-search")?.instance;
-		search?.openGlobalSearch?.(`tag:#${tag}`);
 	}
 
 	applyBodyClasses() {
@@ -1325,6 +1384,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const rest = [...items.slice(0, index), ...items.slice(unitEnd)];
 		const original = doc.sliceString(doc.line(block.fromLine).from, doc.line(block.toLine).to);
 		const startX = event.clientX;
+		const hadFocus = view.hasFocus;
+		const restoreScroll = keepScroll(view); // where the note was when the drag started
 		const indicator = document.body.createDiv({ cls: "fkm-drop-indicator" });
 		grip.closest(".cm-line")?.addClass("fkm-item-dragging");
 		let drop = null;
@@ -1376,6 +1437,13 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			grip.removeEventListener("pointercancel", finish);
 			indicator.remove();
 			view.dom.querySelectorAll(".fkm-item-dragging").forEach(el => el.removeClass("fkm-item-dragging"));
+			// Phones: keep the keyboard closed and the note where it was.
+			const settle = () => {
+				if (!hadFocus && view.hasFocus) view.contentDOM.blur();
+				restoreScroll();
+			};
+			settle();
+			[50, 150, 400].forEach(ms => setTimeout(settle, ms));
 			if (e.type !== "pointerup" || !drop) return;
 			const now = view.state.doc;
 			if (block.toLine > now.lines) return;
@@ -1404,13 +1472,28 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	enhanceBoards() {
 		const s = this.settings;
 		this.app.workspace.containerEl.querySelectorAll(".kg-container").forEach(container => {
+			const controller = this.controllerFor(container);
+			const search = container.querySelector(":scope > .fkm-search");
+			if (s.searchBar && controller && !search) {
+				container.prepend(this.searchBar(controller));
+			} else if (!s.searchBar && search) {
+				search.remove();
+			}
 			const bar = container.querySelector(":scope > .fkm-take-note");
 			if (s.takeANote && !bar) {
+				// Like Keep: "Take a note…", or the checkbox icon for a new list.
 				const el = createDiv({ cls: "fkm-take-note" });
 				obsidian.setIcon(el.createSpan({ cls: "fkm-take-note-icon" }), "plus");
-				el.createSpan({ text: "Take a note…" });
-				el.addEventListener("click", () => this.newNote());
-				container.prepend(el);
+				el.createSpan({ cls: "fkm-take-note-text", text: "Take a note…" });
+				const list = el.createSpan({ cls: "fkm-take-note-list clickable-icon", attr: { "aria-label": "New list" } });
+				obsidian.setIcon(list, "square-check-big");
+				const tag = () => controller?.fkmFilter?.tag ?? null; // a note taken under a label gets that label
+				el.addEventListener("click", event => {
+					void this.newNote({ list: list.contains(event.target), tag: tag() });
+				});
+				const searchEl = container.querySelector(":scope > .fkm-search");
+				if (searchEl) searchEl.after(el);
+				else container.prepend(el);
 			} else if (!s.takeANote && bar) {
 				bar.remove();
 			}
@@ -1420,6 +1503,250 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				else this.wireMouseDrag(container);
 			}
 		});
+	}
+
+	// The Bases controller of the board that `container` belongs to.
+	controllerFor(container) {
+		for (const leaf of this.app.workspace.getLeavesOfType("bases")) {
+			if (leaf.view.containerEl.contains(container)) return leaf.view.controller ?? null;
+		}
+		return null;
+	}
+
+	// Keep-style filtering of a board: by text (title, labels and the note's text,
+	// unlike Bases' own search, which only looks at the card's properties), by
+	// label, or notes with a reminder. Hooked into the board's own result list.
+	filterOf(controller) {
+		if (controller.fkmFilter) return controller.fkmFilter;
+		const filter = { text: "", tag: null, reminders: false, matches: null };
+		const original = controller.applySearchQuery;
+		const plugin = this;
+		controller.applySearchQuery = function (entries, order) {
+			const result = original.call(this, entries, order);
+			return filter.text || filter.tag || filter.reminders ? result.filter(entry => plugin.passes(entry.file, filter)) : result;
+		};
+		controller.fkmFilter = filter;
+		this.register(() => {
+			controller.applySearchQuery = original;
+			delete controller.fkmFilter;
+			controller.requestNotifyView?.();
+		});
+		return filter;
+	}
+
+	passes(file, filter) {
+		if (filter.tag && !this.labelsOf(file).some(tag => tag.toLowerCase() === filter.tag.toLowerCase())) return false;
+		if (filter.reminders && !this.reminderOf(file)) return false;
+		if (filter.text && !filter.matches?.has(file.path)) return false;
+		return true;
+	}
+
+	// The note's labels: the tags in its properties, without "#" (hashtags in the
+	// text stay text, like in Keep).
+	labelsOf(file) {
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+		return [...new Set((obsidian.parseFrontMatterTags(fm) ?? []).map(tag => tag.replace(/^#/, "")))];
+	}
+
+	async setFilter(controller, change) {
+		const filter = this.filterOf(controller);
+		Object.assign(filter, change);
+		if ("text" in change) {
+			const words = filter.text.toLowerCase().split(/\s+/).filter(Boolean);
+			if (!words.length) {
+				filter.text = "";
+				filter.matches = null;
+			} else {
+				const run = (this.searchRun = (this.searchRun ?? 0) + 1);
+				const matches = new Set();
+				for (const file of this.app.vault.getMarkdownFiles()) {
+					const fm = this.frontmatterOf(file);
+					const haystack = [file.basename, fm.keep_title ?? "", ...this.labelsOf(file), await this.app.vault.cachedRead(file)]
+						.join("\n").toLowerCase();
+					if (words.every(word => haystack.includes(word))) matches.add(file.path);
+				}
+				if (run !== this.searchRun) return; // a newer search is running
+				filter.matches = matches;
+			}
+		}
+		controller.requestNotifyView();
+		this.renderSearchBars();
+		this.labelsView()?.render();
+	}
+
+	// The search bar at the top of the board, always visible like Keep's.
+	searchBar(controller) {
+		const filter = this.filterOf(controller);
+		const bar = createDiv({ cls: "fkm-search" });
+		bar.fkmController = controller;
+		obsidian.setIcon(bar.createSpan({ cls: "fkm-search-icon" }), "search");
+		const chip = bar.createSpan({ cls: "fkm-search-chip" });
+		const input = bar.createEl("input", { type: "search", placeholder: "Search", value: filter.text });
+		const clear = bar.createSpan({ cls: "fkm-search-clear clickable-icon", attr: { "aria-label": "Clear search" } });
+		obsidian.setIcon(clear, "x");
+		let timer = null;
+		input.addEventListener("input", () => {
+			clearTimeout(timer);
+			timer = setTimeout(() => void this.setFilter(controller, { text: input.value }), 200);
+		});
+		input.addEventListener("keydown", event => {
+			if (event.key === "Escape") {
+				input.value = "";
+				void this.setFilter(controller, { text: "" });
+			}
+		});
+		clear.addEventListener("click", () => {
+			input.value = "";
+			this.activeLabel = "notes";
+			void this.setFilter(controller, { text: "", tag: null, reminders: false });
+		});
+		chip.addEventListener("click", () => {
+			this.activeLabel = "notes";
+			void this.setFilter(controller, { tag: null, reminders: false });
+		});
+		this.renderSearchBar(bar);
+		return bar;
+	}
+
+	renderSearchBar(bar) {
+		const filter = bar.fkmController?.fkmFilter;
+		if (!filter) return;
+		const chip = bar.querySelector(".fkm-search-chip");
+		const label = filter.tag ? filter.tag : filter.reminders ? "Reminders" : "";
+		chip.empty();
+		chip.toggleClass("is-active", !!label);
+		if (label) {
+			chip.createSpan({ text: label });
+			obsidian.setIcon(chip.createSpan({ cls: "fkm-search-chip-x" }), "x");
+			chip.setAttribute("aria-label", "Show all notes");
+		}
+		const input = bar.querySelector("input");
+		if (document.activeElement !== input && input.value !== filter.text) input.value = filter.text;
+		bar.querySelector(".fkm-search-clear").toggleClass("is-visible", !!(filter.text || label));
+	}
+
+	renderSearchBars() {
+		document.querySelectorAll(".fkm-search").forEach(bar => this.renderSearchBar(bar));
+	}
+
+	// The board to show a label on: an open one, or else the first .base file with a Keep view.
+	async openBoard() {
+		const isBoard = leaf => leaf.view?.containerEl?.querySelector(".kg-container")
+			|| /keep-grid-view/.test(leaf.view?.data ?? "");
+		const open = this.app.workspace.getLeavesOfType("bases").filter(isBoard);
+		let leaf = open.find(l => l === this.app.workspace.getMostRecentLeaf()) ?? open[0];
+		if (!leaf) {
+			let file = null;
+			for (const f of this.app.vault.getFiles().filter(f => f.extension === "base")) {
+				if (/keep-grid-view/.test(await this.app.vault.cachedRead(f))) {
+					file = f;
+					break;
+				}
+			}
+			if (!file) {
+				new obsidian.Notice("No Keep board yet: run the command \"Create a Keep board\" first.");
+				return null;
+			}
+			leaf = this.app.workspace.getLeaf(false);
+			await leaf.openFile(file);
+		}
+		await leaf.loadIfDeferred?.();
+		this.app.workspace.revealLeaf(leaf);
+		for (let i = 0; i < 30 && !leaf.view.controller?.view; i++) await sleep(100);
+		return leaf.view.controller ?? null;
+	}
+
+	// From the labels sidebar or a label on a note: "notes", "reminders", "archive" or "label:<name>".
+	async showOnBoard(what) {
+		const controller = await this.openBoard();
+		if (!controller) return;
+		const names = controller.getQueryViewNames?.() ?? [];
+		const archive = names.find(n => /archiv/i.test(n));
+		const main = names.find(n => n !== archive) ?? names[0];
+		const view = what === "archive" ? archive : main;
+		if (view && controller.viewName !== view) controller.selectView(view);
+		this.activeLabel = what;
+		await this.setFilter(controller, {
+			tag: what.startsWith("label:") ? what.slice(6) : null,
+			reminders: what === "reminders",
+		});
+		if (obsidian.Platform.isMobile) this.app.workspace.leftSplit?.collapse?.();
+	}
+
+	// The side menu (one; a leftover second one, e.g. after a reload, is closed).
+	labelsView() {
+		const leaves = this.app.workspace.getLeavesOfType(LABELS_VIEW);
+		const keep = leaves.find(leaf => leaf.view instanceof LabelsView) ?? leaves[0];
+		leaves.filter(leaf => leaf !== keep).forEach(leaf => leaf.detach());
+		// Not drawn yet while it's a tab in the background (it draws itself when shown).
+		return keep?.view instanceof LabelsView ? keep.view : null;
+	}
+
+	async openLabelsView(reveal = true) {
+		this.labelsView();
+		let leaf = this.app.workspace.getLeavesOfType(LABELS_VIEW)[0];
+		if (!leaf) {
+			leaf = this.app.workspace.getLeftLeaf(false);
+			await leaf.setViewState({ type: LABELS_VIEW, active: reveal });
+		}
+		if (reveal) this.app.workspace.revealLeaf(leaf);
+	}
+
+	// All labels in the vault, sorted.
+	allLabels() {
+		const labels = new Map();
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			for (const name of this.labelsOf(file)) {
+				if (name.toLowerCase() !== ARCHIVE_TAG && !labels.has(name.toLowerCase())) labels.set(name.toLowerCase(), name);
+			}
+		}
+		return [...labels.values()].sort((a, b) => a.localeCompare(b));
+	}
+
+	// Add or remove a label (a tag in the note's properties).
+	async setLabel(file, label, on) {
+		await this.app.fileManager.processFrontMatter(file, fm => {
+			const tags = (Array.isArray(fm.tags) ? fm.tags : typeof fm.tags === "string" ? fm.tags.split(/[,\s]+/) : [])
+				.map(t => String(t).replace(/^#/, "")).filter(Boolean);
+			const rest = tags.filter(t => t.toLowerCase() !== label.toLowerCase());
+			if (on) rest.push(label);
+			if (rest.length) fm.tags = rest;
+			else delete fm.tags;
+		});
+		if (!on) {
+			// The label may also be written in the text (#label): remove it there too.
+			const escaped = label.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+			const tag = new RegExp(`(^|[ \\t])#${escaped}(?=\\s|$)`, "gi");
+			await this.app.vault.process(file, text => {
+				const start = text.match(/^---\n[\s\S]*?\n---\n/)?.[0] ?? "";
+				return start + text.slice(start.length).split("\n").flatMap(line => {
+					if (!line.match(tag)) return [line];
+					const rest = line.replace(tag, "$1").trimEnd();
+					return rest.trim() ? [rest] : [];
+				}).join("\n");
+			});
+		}
+	}
+
+	// Keep's "Show checkboxes" / "Hide checkboxes": turn the note's lines into a checklist or back.
+	async setCheckboxes(file, on) {
+		await this.app.vault.process(file, text => {
+			const start = text.match(/^---\n[\s\S]*?\n---\n/)?.[0] ?? "";
+			const lines = text.slice(start.length).split("\n").map(line => {
+				if (on) {
+					if (!line.trim() || TASK_RE.test(line)) return line;
+					const m = /^([ \t]*)(?:[-*+] )?(.*)$/.exec(line);
+					return `${m[1]}- [ ] ${m[2]}`;
+				}
+				const m = TASK_RE.exec(line);
+				return m ? `${m[1]}${m[4] ?? ""}` : line;
+			});
+			return start + lines.join("\n");
+		});
+	}
+
+	hasCheckboxes(file) {
+		return (this.app.metadataCache.getFileCache(file)?.listItems ?? []).some(item => item.task !== undefined);
 	}
 
 	// A board listener that is removed again when the plugin unloads.
@@ -1640,13 +1967,16 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 	// ----- new notes and the board command ---------------------------------------------------
 
-	async newNote() {
+	// A new note in the Keep pop-up. `list`: it starts as a checklist; `tag`: it gets that
+	// label (a note taken while the board shows a label, like in Keep).
+	async newNote({ list = false, tag = null } = {}) {
 		const parent = this.app.fileManager.getNewFileParent("");
+		const content = (tag ? `---\ntags:\n  - ${JSON.stringify(tag)}\n---\n` : "") + (list ? "- [ ] " : "");
 		// Obsidian's own "Untitled" (in the app's language), where available.
 		const file = typeof this.app.fileManager.createNewMarkdownFile === "function"
-			? await this.app.fileManager.createNewMarkdownFile(parent)
-			: await this.app.vault.create(obsidian.normalizePath(`${parent.path}/Untitled ${Date.now()}.md`), "");
-		new NewNoteModal(this.app, file).open();
+			? await this.app.fileManager.createNewMarkdownFile(parent, undefined, content)
+			: await this.app.vault.create(obsidian.normalizePath(`${parent.path}/Untitled ${Date.now()}.md`), content);
+		new NewNoteModal(this.app, file, content).open();
 	}
 
 	async createBoard() {
@@ -1665,9 +1995,10 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 // styles .kg-edit-modal), with the title selected so you can type it straight
 // away. Closed untouched (no text, title unchanged), the note is thrown away.
 class NewNoteModal extends obsidian.Modal {
-	constructor(app, file) {
+	constructor(app, file, initial = "") {
 		super(app);
 		this.file = file;
+		this.initial = initial;
 		this.createdName = file.basename;
 		this.leaf = null;
 	}
@@ -1695,7 +2026,7 @@ class NewNoteModal extends obsidian.Modal {
 		const file = this.app.vault.getAbstractFileByPath(this.file.path);
 		if (file instanceof obsidian.TFile && file.basename === this.createdName) {
 			const text = await this.app.vault.read(file);
-			if (text.trim() === "") await this.app.fileManager.trashFile(file);
+			if (text.trim() === "" || text === this.initial) await this.app.fileManager.trashFile(file);
 		}
 	}
 }
@@ -1746,6 +2077,119 @@ class ReminderModal extends obsidian.Modal {
 		if (current) {
 			const remove = contentEl.createEl("button", { cls: "fkm-reminder-remove mod-warning", text: "Remove reminder" });
 			remove.addEventListener("click", () => void set(null));
+		}
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+// Keep's side menu: Notes, Reminders, the labels and Archive. A click shows them on the board.
+class LabelsView extends obsidian.ItemView {
+	constructor(leaf, plugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
+
+	getViewType() {
+		return LABELS_VIEW;
+	}
+
+	getDisplayText() {
+		return "Labels";
+	}
+
+	getIcon() {
+		return "tags";
+	}
+
+	async onOpen() {
+		this.render();
+	}
+
+	render() {
+		const el = this.contentEl;
+		el.empty();
+		el.addClass("fkm-labels-view");
+		const active = this.plugin.activeLabel ?? "notes";
+		const item = (what, icon, text) => {
+			const row = el.createDiv({ cls: "fkm-labels-item tappable" });
+			row.toggleClass("is-active", what === active);
+			obsidian.setIcon(row.createSpan({ cls: "fkm-labels-icon" }), icon);
+			row.createSpan({ cls: "fkm-labels-text", text });
+			row.addEventListener("click", () => void this.plugin.showOnBoard(what));
+		};
+		item("notes", "lightbulb", "Notes");
+		if (this.plugin.settings.reminders) item("reminders", "bell", "Reminders");
+		const labels = this.plugin.allLabels();
+		if (labels.length) el.createDiv({ cls: "fkm-labels-heading", text: "Labels" });
+		for (const label of labels) item(`label:${label}`, "tag", label);
+		el.createDiv({ cls: "fkm-labels-separator" });
+		item("archive", "archive", "Archive");
+	}
+}
+
+// Keep's "Label note": tick the note's labels, or type a new one.
+class LabelModal extends obsidian.Modal {
+	constructor(plugin, file) {
+		super(plugin.app);
+		this.plugin = plugin;
+		this.file = file;
+	}
+
+	onOpen() {
+		this.modalEl.addClass("fkm-label-modal");
+		this.titleEl.setText("Label note");
+		this.checked = new Set(this.plugin.labelsOf(this.file).map(l => l.toLowerCase()));
+		this.known = this.plugin.allLabels();
+		this.input = this.contentEl.createEl("input", { type: "text", placeholder: "Enter label name", cls: "fkm-label-input" });
+		this.list = this.contentEl.createDiv({ cls: "fkm-label-list" });
+		this.input.addEventListener("input", () => this.renderList());
+		this.input.addEventListener("keydown", event => {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				const name = this.cleanName(this.input.value);
+				if (name) void this.toggle(this.known.find(l => l.toLowerCase() === name.toLowerCase()) ?? name, true);
+			}
+		});
+		this.renderList();
+		if (!obsidian.Platform.isMobile) this.input.focus();
+	}
+
+	// Obsidian tags have no spaces and only letters, digits, "_", "-" and "/".
+	cleanName(text) {
+		const name = text.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_\-/]/gu, "");
+		return /^\d+$/.test(name) ? `${name}-` : name;
+	}
+
+	async toggle(label, on) {
+		await this.plugin.setLabel(this.file, label, on);
+		if (on) this.checked.add(label.toLowerCase());
+		else this.checked.delete(label.toLowerCase());
+		if (!this.known.some(l => l.toLowerCase() === label.toLowerCase())) this.known = [...this.known, label].sort((a, b) => a.localeCompare(b));
+		this.input.value = "";
+		this.renderList();
+	}
+
+	renderList() {
+		const list = this.list;
+		list.empty();
+		const query = this.input.value.trim().toLowerCase();
+		const shown = this.known.filter(l => l.toLowerCase().includes(query.replace(/\s+/g, "-")));
+		for (const label of shown) {
+			const row = list.createEl("label", { cls: "fkm-label-row" });
+			const box = row.createEl("input", { type: "checkbox" });
+			box.checked = this.checked.has(label.toLowerCase());
+			box.addEventListener("change", () => void this.toggle(label, box.checked));
+			row.createSpan({ text: label });
+		}
+		const name = this.cleanName(this.input.value);
+		if (name && !this.known.some(l => l.toLowerCase() === name.toLowerCase())) {
+			const create = list.createDiv({ cls: "fkm-label-create tappable" });
+			obsidian.setIcon(create.createSpan(), "plus");
+			create.createSpan({ text: `Create "${name}"` });
+			create.addEventListener("click", () => void this.toggle(name, true));
 		}
 	}
 
