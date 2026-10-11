@@ -16,6 +16,10 @@ reminders, quick notes, and checklists that tidy themselves up the way Keep's do
   reminder and archive; a bottom bar has "+" (checkboxes, image, recording),
   colour, undo/redo and "⋮" (delete, make a copy, labels). Both stay put while
   the note scrolls.
+- **An open note has its colour**, the same shade as its card, like in Keep.
+- **Keep titles.** Imported notes show their Keep title even where a file name
+  can't hold it ("Sept/Oct 2026" is saved as "SeptOct 2026"). Editing the title
+  renames the note too.
 - **Notes look like Keep's.** No properties above the text; the note's tags
   are shown as labels below it, with "Edited …" (hover for when it was
   created). They're outside the text, so they can't be edited by accident and
@@ -102,6 +106,7 @@ The checklist features work in any note, with or without the board.
 | Setting | Default |
 |---|---|
 | Hide properties | on |
+| Keep titles | on |
 | Labels and edit date below the note | on |
 | Pin button | on |
 | Colour button | on |

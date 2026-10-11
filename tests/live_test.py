@@ -404,6 +404,18 @@ def main():
         check("\"Show checkboxes\" turns lines into a checklist, \"Hide checkboxes\" back",
               on == "- [ ] Milk\n- [ ] Bread\n" and text() == "Milk\nBread\n", (on, text()))
 
+        # A Keep title the file name can't hold ("A/B" is saved as "AB").
+        open_note("AB list", "---\nkeep_title: A/B list\n---\n- [ ] One\n")
+        shown = ob.js(PRELUDE + """await wait(500); const el = window.__tcLeaf.view.contentEl;
+            return { title: el.querySelector('.fkm-title')?.textContent ?? null,
+                     inline: getComputedStyle(el.querySelector('.inline-title:not(.fkm-title)')).display };""")
+        check("an imported note shows its Keep title (\"A/B list\"), not the file name", shown == {"title": "A/B list", "inline": "none"}, shown)
+        renamed = ob.js(PRELUDE + """const el = window.__tcLeaf.view.contentEl.querySelector('.fkm-title');
+            el.focus(); el.textContent = 'C/D list'; el.blur(); await wait(1200);
+            const f = window.__tcLeaf.view.file;
+            return { file: f.basename, title: app.metadataCache.getFileCache(f)?.frontmatter?.keep_title };""")
+        check("editing the title updates keep_title and renames the note", renamed == {"file": "CD list", "title": "C/D list"}, renamed)
+
         print("Settings and opt-out")
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})
         click_checkbox("A")
@@ -455,6 +467,8 @@ def main():
                 const item = [...document.querySelectorAll('.menu .menu-item')].find(i => i.textContent.trim() === 'Blue');
                 item.click(); await wait(800);""")
             check("the Colour button sets the colour", frontmatter("Card B").get("keep_color") == "blue", frontmatter("Card B"))
+            colored = ob.js(PRELUDE + "await wait(500); return [...document.querySelectorAll('.kg-edit-modal')].pop()?.classList.contains('fkm-color-blue');")
+            check("…and the open pop-up takes the colour, like in Keep", colored, colored)
             press_escape()
             time.sleep(1)
             check("a pinned note moves to the top of the board", card_order()[0] == "Card B", card_order())

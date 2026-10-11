@@ -565,3 +565,34 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 	left: var(--size-4-3, 12px) !important;
 	right: auto !important;
 }
+
+/* ===== The open note: its colour (the same shade as its card) and its Keep title ===== */
+.fkm-color-red { --fkm-note-bg: color-mix(in srgb, var(--color-red) 15%, var(--background-primary)); }
+.fkm-color-orange { --fkm-note-bg: color-mix(in srgb, var(--color-orange) 15%, var(--background-primary)); }
+.fkm-color-yellow { --fkm-note-bg: color-mix(in srgb, var(--color-yellow) 15%, var(--background-primary)); }
+.fkm-color-green { --fkm-note-bg: color-mix(in srgb, var(--color-green) 15%, var(--background-primary)); }
+.fkm-color-cyan { --fkm-note-bg: color-mix(in srgb, var(--color-cyan) 15%, var(--background-primary)); }
+.fkm-color-blue { --fkm-note-bg: color-mix(in srgb, var(--color-blue) 15%, var(--background-primary)); }
+.fkm-color-purple { --fkm-note-bg: color-mix(in srgb, var(--color-purple) 15%, var(--background-primary)); }
+.fkm-color-pink { --fkm-note-bg: color-mix(in srgb, var(--color-pink) 15%, var(--background-primary)); }
+
+/* Everything inside takes the colour as its background. */
+.fkm-note-colored > .workspace-leaf-content,
+.modal.fkm-note-colored .workspace-leaf-content {
+	--background-primary: var(--fkm-note-bg);
+	background-color: var(--fkm-note-bg);
+}
+
+.modal.fkm-note-colored {
+	background-color: var(--fkm-note-bg);
+}
+
+/* Keep's title instead of the file name. */
+.fkm-has-title > .inline-title:not(.fkm-title) {
+	display: none;
+}
+
+.fkm-title {
+	outline: none;
+	cursor: text;
+}

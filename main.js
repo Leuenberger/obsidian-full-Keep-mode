@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS = {
 	undoButtons: true,
 	// notes and board
 	hideProperties: true, // like Keep: no properties above the note
+	keepTitles: true, // show keep_title (e.g. "Sept/Oct 2026") instead of the file name
 	noteFooter: true, // labels and "Edited ..." below the note
 	pinButton: true,
 	colorButton: true,
@@ -59,6 +60,7 @@ const ORDER_PROPERTY = "keep_order"; // position on the board; higher = further 
 const ARCHIVE_PROPERTY = "keep_archived"; // true = archived (the tag #archived counts too)
 const REMINDER_PROPERTY = "keep_reminder"; // local date and time, "YYYY-MM-DDTHH:mm"
 const CREATED_PROPERTY = "keep_created"; // when the note was created in Keep (imported notes)
+const TITLE_PROPERTY = "keep_title"; // the Keep title, when the file name can't hold it (e.g. "Sept/Oct 2026")
 const ARCHIVE_TAG = "archived";
 const KEEP_VIEW_PLUGIN = "keep-bases-view";
 const LABELS_VIEW = "full-keep-mode-labels";
@@ -848,6 +850,7 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 			});
 		}
 		toggle("Hide properties", "Like Keep, notes don't show their properties above the text. (They stay in the note; see them in Obsidian's \"File properties\" side panel.)", "hideProperties");
+		toggle("Keep titles", `Imported notes show their Keep title (property "${TITLE_PROPERTY}"), also where the file name can't hold it, like "Sept/Oct 2026". Editing the title renames the note too.`, "keepTitles");
 		toggle("Labels and edit date below the note", "Like Keep: the note's tags as labels, and when it was last edited (hover for when it was created).", "noteFooter");
 		toggle("Pin button", "A pin in each note's top bar. Pinned notes are shown first on the board.", "pinButton");
 		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
@@ -966,7 +969,23 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 		// Keep the top-bar icons in step when a note is changed elsewhere (e.g. on the board).
 		this.registerEvent(this.app.metadataCache.on("changed", file => this.renderButtons(file)));
-		this.registerEvent(this.app.workspace.on("file-open", () => this.renderButtons()));
+		this.registerEvent(this.app.workspace.on("file-open", () => {
+			this.renderButtons();
+			// Obsidian is still setting up the opened note: once more when it's done.
+			setTimeout(() => this.renderButtons(), 300);
+		}));
+		// A note with a Keep title renamed elsewhere (file list, Obsidian's title): the title follows.
+		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+			if (!(file instanceof obsidian.TFile) || file.extension !== "md" || this.renamingForTitle === file.path) return;
+			const oldName = oldPath.split("/").pop().replace(/\.md$/, "");
+			if (oldName === file.basename) return; // only moved to another folder
+			const title = this.frontmatterOf(file)[TITLE_PROPERTY];
+			if (typeof title === "string") {
+				void this.app.fileManager.processFrontMatter(file, fm => {
+					fm[TITLE_PROPERTY] = file.basename;
+				});
+			}
+		}));
 
 		// Reminders: check now (catching up on missed ones) and every 20 seconds.
 		this.app.workspace.onLayoutReady(() => {
@@ -1003,7 +1022,12 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			if (leaf.view?.fullKeepModeButtons === this) delete leaf.view.fullKeepModeButtons;
 		});
 		document.body.removeClass("fkm-hide-properties");
-		document.querySelectorAll(".fkm-note-footer, .fkm-bottom-bar").forEach(el => el.remove());
+		document.querySelectorAll(".fkm-note-footer, .fkm-bottom-bar, .fkm-title").forEach(el => el.remove());
+		document.querySelectorAll(".fkm-has-title").forEach(el => el.removeClass("fkm-has-title"));
+		document.querySelectorAll(".fkm-note-colored").forEach(el => {
+			el.removeClass("fkm-note-colored");
+			for (const c of COLORS) if (c.id) el.removeClass(`fkm-color-${c.id}`);
+		});
 		document.querySelectorAll(".fkm-has-footer").forEach(el => el.removeClass("fkm-has-footer"));
 		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
 		this.boardObserver?.disconnect();
@@ -1052,7 +1076,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const s = this.settings;
 		const added = [];
 		this.footerViews.add(view);
-		setTimeout(() => this.renderFooter(view), 0);
+		setTimeout(() => this.renderButtons(view.file), 0);
+		setTimeout(() => this.renderButtons(view.file), 300);
 		// addAction puts each new button in front, so add them right to left:
 		// undo, redo, pin, reminder, colour, archive.
 		if (s.archiveButton) {
@@ -1201,7 +1226,90 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		for (const [view, button] of this.pinButtons) if (!file || view.file === file) this.renderPin(view, button);
 		for (const [view, button] of this.archiveButtons) if (!file || view.file === file) this.renderArchive(view, button);
 		for (const [view, button] of this.reminderButtons) if (!file || view.file === file) this.renderReminder(view, button);
-		for (const view of this.footerViews) if (!file || view.file === file) this.renderFooter(view);
+		for (const view of this.footerViews) {
+			if (file && view.file !== file) continue;
+			this.renderFooter(view);
+			this.renderColor(view);
+			this.renderTitle(view);
+		}
+	}
+
+	// ----- the open note: its colour and its Keep title ----------------------------------------
+
+	// Like Keep, an open note has its colour (the same shade as its card on the board).
+	renderColor(view) {
+		const value = this.settings.colorButton && view.file ? this.frontmatterOf(view.file)[COLOR_PROPERTY] : null;
+		const color = COLORS.some(c => c.id && c.id === value) ? value : null;
+		const targets = [view.containerEl.parentElement, view.containerEl.closest(".modal")].filter(Boolean);
+		for (const el of targets) {
+			for (const c of COLORS) if (c.id) el.removeClass(`fkm-color-${c.id}`);
+			el.toggleClass("fkm-note-colored", !!color);
+			if (color) el.addClass(`fkm-color-${color}`);
+		}
+	}
+
+	// Notes imported from Keep keep their real title in keep_title when the file name
+	// can't hold it ("Sept/Oct 2026" is saved as "SeptOct 2026"). Show that title
+	// instead of the file name; editing it updates keep_title and renames the file.
+	renderTitle(view) {
+		const sizer = view.contentEl.querySelector(".markdown-source-view .cm-sizer");
+		const inline = sizer?.querySelector(":scope > .inline-title");
+		const old = sizer?.querySelector(":scope > .fkm-title");
+		const file = view.file;
+		const title = file ? this.frontmatterOf(file)[TITLE_PROPERTY] : null;
+		const show = this.settings.keepTitles && inline && typeof title === "string" && title.trim() && title !== file.basename;
+		if (!show) {
+			old?.remove();
+			sizer?.removeClass("fkm-has-title");
+			return;
+		}
+		sizer.addClass("fkm-has-title");
+		const el = old ?? createDiv({ cls: "fkm-title inline-title", attr: { contenteditable: "true", spellcheck: "false" } });
+		if (!old) {
+			inline.before(el);
+			el.addEventListener("keydown", event => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					// Like Obsidian's own title: Enter goes on to the note's text.
+					const cm = view.editor?.cm;
+					if (cm) {
+						const start = bodyStart(cm.state.doc);
+						cm.focus();
+						cm.dispatch({ selection: { anchor: start } });
+					}
+				} else if (event.key === "Escape") {
+					el.textContent = this.frontmatterOf(view.file)[TITLE_PROPERTY] ?? view.file.basename;
+					el.blur();
+				}
+			});
+			el.addEventListener("blur", () => void this.setTitle(view.file, el.textContent));
+		}
+		if (document.activeElement !== el && el.textContent !== title) el.textContent = title;
+	}
+
+	// The file name for a title: without the characters file names can't have.
+	safeName(title) {
+		return title.replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim();
+	}
+
+	async setTitle(file, text) {
+		const title = text.replace(/\s+/g, " ").trim();
+		if (!file || !title || title === this.frontmatterOf(file)[TITLE_PROPERTY]) return;
+		await this.app.fileManager.processFrontMatter(file, fm => {
+			fm[TITLE_PROPERTY] = title;
+		});
+		const name = this.safeName(title);
+		if (name && name !== file.basename) {
+			const path = obsidian.normalizePath(`${file.parent?.path ?? ""}/${name}.md`);
+			if (!this.app.vault.getAbstractFileByPath(path)) {
+				this.renamingForTitle = path;
+				try {
+					await this.app.fileManager.renameFile(file, path);
+				} finally {
+					this.renamingForTitle = null;
+				}
+			}
+		}
 	}
 
 	// ----- below the note: labels and "Edited ..." (like Keep) ---------------------------------
