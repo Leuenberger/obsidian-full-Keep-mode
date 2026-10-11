@@ -1,0 +1,1 @@
+# obsidian-full-Keep-mode
