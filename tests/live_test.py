@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Live tests for Keep-style Checklists, run against a real, running Obsidian.
+Live tests for Full Keep Mode, run against a real, running Obsidian.
 
 Start Obsidian with its debugging port open (close it first):
     Windows:  "%LOCALAPPDATA%\\Programs\\Obsidian\\Obsidian.exe" --remote-debugging-port=9222
@@ -9,7 +9,7 @@ Then, with the plugin enabled in the open vault:
     pip install websocket-client
     python tests/live_test.py
 
-The tests only use temporary notes (created in a "Keep-style Checklists tests" folder
+The tests only use temporary notes (created in a "Full Keep Mode tests" folder
 and moved to the trash afterwards). Open pop-ups are hidden while they run.
 Mouse drags use real input events, so keep the Obsidian window visible.
 """
@@ -22,7 +22,7 @@ import urllib.request
 import websocket
 
 PORT = 9222
-FOLDER = "Keep-style Checklists tests"
+FOLDER = "Full Keep Mode tests"
 
 
 class Obsidian:
@@ -74,7 +74,7 @@ const FOLDER = {json.dumps(FOLDER)};
 def open_note(name, content, settings=None):
     """Create/overwrite a test note, open it in a tab, put the cursor at the end."""
     ob.js(PRELUDE + f"""
-    const plugin = app.plugins.plugins["keep-style-checklists"];
+    const plugin = app.plugins.plugins["full-keep-mode"];
     window.__tcSaved ??= JSON.stringify(plugin.settings);
     Object.assign(plugin.settings, JSON.parse({json.dumps(json.dumps(settings or {}))}));
     plugin.refreshEditors();
@@ -163,8 +163,8 @@ def main():
 
     try:
         ob.js("""document.querySelectorAll(".modal-container").forEach(m => { m.dataset.tcHidden = "1"; m.style.visibility = "hidden"; });""")
-        info = ob.js("""const p = app.plugins.plugins["keep-style-checklists"]; return { loaded: !!p, version: app.plugins.manifests["keep-style-checklists"]?.version };""")
-        print(f"Keep-style Checklists {info['version']}")
+        info = ob.js("""const p = app.plugins.plugins["full-keep-mode"]; return { loaded: !!p, version: app.plugins.manifests["full-keep-mode"]?.version };""")
+        print(f"Full Keep Mode {info['version']}")
         check("plugin is loaded", info["loaded"])
 
         print("Ticking")
@@ -242,15 +242,15 @@ def main():
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})
         click_checkbox("A")
         check("with \"Move ticked items down\" off, a ticked item stays", body() == "- [x] A\n- [ ] B", body())
-        open_note("opted out", "---\nkeep-style-checklists: false\n---\n" + HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": True})
+        open_note("opted out", "---\nfull-keep-mode: false\n---\n" + HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": True})
         time.sleep(1)
         click_checkbox("A")
         grips = ob.js("return window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.tc-grip').length;")
-        check("a note with keep-style-checklists: false is left alone", body() == "- [x] A\n- [ ] B" and grips == 0, (body(), grips))
+        check("a note with full-keep-mode: false is left alone", body() == "- [x] A\n- [ ] B" and grips == 0, (body(), grips))
 
         print("Command and header buttons")
         open_note("command", HEAD + "- [x] A\n- [ ] B\n- [x] C\n- [ ] D")
-        ob.js(PRELUDE + "app.commands.executeCommandById('keep-style-checklists:sort-ticked-items'); await wait(500);")
+        ob.js(PRELUDE + "app.commands.executeCommandById('full-keep-mode:sort-ticked-items'); await wait(500);")
         check("\"Move ticked items down in this note\" sorts an existing list", body() == "- [ ] B\n- [ ] D\n- [x] A\n- [x] C", body())
         labels = ob.js("return [...window.__tcLeaf.view.containerEl.querySelectorAll('.view-actions .clickable-icon')].map(b => b.getAttribute('aria-label'));")
         check("Undo and Redo buttons in the note's top bar", "Undo" in labels and "Redo" in labels, labels)
@@ -259,7 +259,7 @@ def main():
 
     finally:
         ob.js(PRELUDE + """
-        const plugin = app.plugins.plugins["keep-style-checklists"];
+        const plugin = app.plugins.plugins["full-keep-mode"];
         if (window.__tcSaved) { Object.assign(plugin.settings, JSON.parse(window.__tcSaved)); delete window.__tcSaved; plugin.refreshEditors(); }
         for (const l of app.workspace.getLeavesOfType("markdown")) if (l.view.file?.path?.startsWith(FOLDER + "/")) l.detach();
         const folder = app.vault.getAbstractFileByPath(FOLDER);

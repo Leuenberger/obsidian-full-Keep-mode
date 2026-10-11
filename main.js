@@ -1,5 +1,6 @@
 /*
- * Keep-style Checklists - checklists that behave like Google Keep's.
+ * Full Keep Mode - the Google Keep experience in Obsidian. This part: checklists
+ * that behave like Google Keep's.
  *
  *  - Ticked items drop below a "N ticked items" divider; unticking moves them back.
  *  - A ticked sub-item of an unticked item is shown in the ticked section under a
@@ -30,7 +31,7 @@ const DEFAULT_SETTINGS = {
 };
 
 // A note can opt out with this property set to false.
-const OPT_OUT_PROPERTY = "keep-style-checklists";
+const OPT_OUT_PROPERTY = "full-keep-mode";
 const INDENT_STEP = 28; // px of sideways drag per indent level
 const MAX_STYLED_DEPTH = 5; // indent levels with alignment styles (deeper ones use level 5's)
 
@@ -561,7 +562,7 @@ function checklistExtension(plugin) {
 
 // ----- settings tab -------------------------------------------------------------------------
 
-class KeepStyleChecklistsSettingTab extends obsidian.PluginSettingTab {
+class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 	constructor(app, plugin) {
 		super(app, plugin);
 		this.plugin = plugin;
@@ -605,12 +606,12 @@ class KeepStyleChecklistsSettingTab extends obsidian.PluginSettingTab {
 
 // ----- the plugin ---------------------------------------------------------------------------
 
-module.exports = class KeepStyleChecklistsPlugin extends obsidian.Plugin {
+module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.headerButtons = new Set();
 		this.registerEditorExtension(checklistExtension(this));
-		this.addSettingTab(new KeepStyleChecklistsSettingTab(this.app, this));
+		this.addSettingTab(new FullKeepModeSettingTab(this.app, this));
 
 		this.addCommand({
 			id: "sort-ticked-items",
@@ -653,19 +654,19 @@ module.exports = class KeepStyleChecklistsPlugin extends obsidian.Plugin {
 	}
 
 	addHeaderButtons(view) {
-		if (!this.settings.undoButtons || view.keepStyleChecklistsButtons) return;
+		if (!this.settings.undoButtons || view.fullKeepModeButtons) return;
 		// addAction puts each new button in front, so this reads: undo, redo.
 		const redo = view.addAction("redo-2", "Redo", () => view.editor?.redo());
 		const undo = view.addAction("undo-2", "Undo", () => view.editor?.undo());
 		redo.addClass("tc-redo-button");
 		undo.addClass("tc-undo-button");
-		view.keepStyleChecklistsButtons = true;
+		view.fullKeepModeButtons = true;
 		this.headerButtons.add(undo);
 		this.headerButtons.add(redo);
 		view.register(() => {
 			this.headerButtons.delete(undo);
 			this.headerButtons.delete(redo);
-			delete view.keepStyleChecklistsButtons;
+			delete view.fullKeepModeButtons;
 		});
 	}
 

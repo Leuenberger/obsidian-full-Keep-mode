@@ -1,9 +1,9 @@
 {
-	"id": "keep-style-checklists",
-	"name": "Keep-style Checklists",
+	"id": "full-keep-mode",
+	"name": "Full Keep Mode",
 	"version": "1.0.0",
 	"minAppVersion": "1.5.0",
-	"description": "Checklists like Google Keep: ticked items drop below a divider, drag items to reorder or indent (mouse and touch), multi-line items line up, undo and redo buttons.",
+	"description": "The Google Keep experience in Obsidian, starting with checklists: ticked items drop below a divider, drag items to reorder or indent (mouse and touch), multi-line items line up, undo and redo buttons.",
 	"author": "Gabriel Leuenberger",
 	"authorUrl": "https://github.com/Leuenberger",
 	"isDesktopOnly": false
