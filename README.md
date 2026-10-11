@@ -12,6 +12,10 @@ reminders, quick notes, and checklists that tidy themselves up the way Keep's do
 
 - **Pin and colour buttons** in every note's top bar, in tabs and in the
   board's pop-up. Pinned notes come first on the board.
+- **Keep's bars on phones.** In the pop-up, the top bar has just back, pin,
+  reminder and archive; a bottom bar has "+" (checkboxes, image, recording),
+  colour, undo/redo and "⋮" (delete, make a copy, labels). Both stay put while
+  the note scrolls.
 - **Notes look like Keep's.** No properties above the text; the note's tags
   are shown as labels below it, with "Edited …" (hover for when it was
   created). They're outside the text, so they can't be edited by accident and

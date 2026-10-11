@@ -1003,7 +1003,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			if (leaf.view?.fullKeepModeButtons === this) delete leaf.view.fullKeepModeButtons;
 		});
 		document.body.removeClass("fkm-hide-properties");
-		document.querySelectorAll(".fkm-note-footer").forEach(el => el.remove());
+		document.querySelectorAll(".fkm-note-footer, .fkm-bottom-bar").forEach(el => el.remove());
 		document.querySelectorAll(".fkm-has-footer").forEach(el => el.removeClass("fkm-has-footer"));
 		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
 		this.boardObserver?.disconnect();
@@ -1091,7 +1091,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			added.push(redo, undo);
 		}
 		added.forEach(button => this.headerButtons.add(button));
+		const bottom = this.addBottomBar(view);
 		view.register(() => {
+			bottom.remove();
 			added.forEach(button => this.headerButtons.delete(button));
 			this.pinButtons.delete(view);
 			this.archiveButtons.delete(view);
@@ -1101,6 +1103,97 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			view.contentEl.querySelectorAll(".fkm-has-footer").forEach(el => el.removeClass("fkm-has-footer"));
 			if (view.fullKeepModeButtons === this) delete view.fullKeepModeButtons;
 		});
+	}
+
+	// Keep's bar at the bottom of a note on phones: "+" (checkboxes, image, recording),
+	// colour, undo/redo and "⋮". Shown only in the pop-up on phones (styles.css),
+	// where the top bar then keeps just pin, reminder and archive, like Keep.
+	addBottomBar(view) {
+		const s = this.settings;
+		const bar = createDiv({ cls: "fkm-bottom-bar" });
+		const button = (parent, icon, label, onClick) => {
+			const el = parent.createSpan({ cls: "clickable-icon fkm-bottom-button", attr: { "aria-label": label } });
+			obsidian.setIcon(el, icon);
+			el.addEventListener("click", event => onClick(event));
+			return el;
+		};
+		const left = bar.createDiv({ cls: "fkm-bottom-group" });
+		button(left, "square-plus", "Add", event => this.showAddMenu(view, event));
+		if (s.colorButton) button(left, "palette", "Colour", event => this.showColorMenu(view, event));
+		const middle = bar.createDiv({ cls: "fkm-bottom-group fkm-bottom-middle" });
+		if (s.undoButtons) {
+			button(middle, "undo-2", "Undo", () => view.editor?.undo());
+			button(middle, "redo-2", "Redo", () => view.editor?.redo());
+		}
+		const right = bar.createDiv({ cls: "fkm-bottom-group" });
+		button(right, "more-vertical", "More", event => this.showNoteMenu(view, event));
+		view.containerEl.appendChild(bar);
+		// In the pop-up on phones: Keep's back arrow (top left) instead of the close button.
+		setTimeout(() => {
+			const modal = view.containerEl.closest(".modal");
+			const close = obsidian.Platform.isPhone && modal?.querySelector(":scope > .modal-close-button, :scope > .modal-header-button");
+			if (close && !close.hasClass("fkm-back-button")) {
+				close.addClass("fkm-back-button");
+				close.empty();
+				obsidian.setIcon(close, "arrow-left");
+			}
+		}, 0);
+		return bar;
+	}
+
+	// The command of another (core) plugin, run on this view's editor.
+	runOn(view, id) {
+		const command = this.app.commands?.commands?.[id];
+		if (!command) return false;
+		if (command.editorCallback && view.editor) command.editorCallback(view.editor, view);
+		else if (command.editorCheckCallback && view.editor) command.editorCheckCallback(false, view.editor, view);
+		else if (command.callback) command.callback();
+		else if (command.checkCallback) command.checkCallback(false);
+		return true;
+	}
+
+	showAddMenu(view, event) {
+		const file = view.file;
+		if (!file) return;
+		const menu = new obsidian.Menu();
+		const has = this.hasCheckboxes(file);
+		menu.addItem(item => item.setTitle(has ? "Hide checkboxes" : "Show checkboxes").setIcon("square-check-big")
+			.onClick(() => void this.setCheckboxes(file, !has)));
+		if (this.app.commands?.commands?.["editor:attach-file"]) {
+			menu.addItem(item => item.setTitle("Add image or file").setIcon("image").onClick(() => this.runOn(view, "editor:attach-file")));
+		}
+		if (this.app.commands?.commands?.["audio-recorder:start"]) {
+			menu.addItem(item => item.setTitle("Recording").setIcon("mic").onClick(() => this.runOn(view, "audio-recorder:start")));
+		}
+		menu.showAtMouseEvent(event);
+	}
+
+	// Keep's "⋮" menu: delete, make a copy, labels; "More…" has Obsidian's own menu.
+	showNoteMenu(view, event) {
+		const file = view.file;
+		if (!file) return;
+		const menu = new obsidian.Menu();
+		menu.addItem(item => item.setTitle("Delete").setIcon("trash-2").setWarning(true).onClick(async () => {
+			view.containerEl.closest(".modal")?.querySelector(".fkm-back-button, .modal-close-button")?.click();
+			await this.app.fileManager.trashFile(file);
+			new obsidian.Notice("Note moved to the trash");
+		}));
+		menu.addItem(item => item.setTitle("Make a copy").setIcon("copy").onClick(async () => {
+			let path = obsidian.normalizePath(`${file.parent?.path ?? ""}/${file.basename} copy.md`);
+			for (let i = 2; this.app.vault.getAbstractFileByPath(path); i++) {
+				path = obsidian.normalizePath(`${file.parent?.path ?? ""}/${file.basename} copy ${i}.md`);
+			}
+			await this.app.vault.copy(file, path);
+			new obsidian.Notice("Copy made");
+		}));
+		menu.addItem(item => item.setTitle("Labels").setIcon("tag").onClick(() => new LabelModal(this, file).open()));
+		menu.addSeparator();
+		menu.addItem(item => item.setTitle("More…").setIcon("more-horizontal").onClick(() => {
+			const more = new obsidian.Menu();
+			view.onPaneMenu(more, "more-options");
+			more.showAtMouseEvent(event);
+		}));
+		menu.showAtMouseEvent(event);
 	}
 
 	// Bring all top-bar buttons of views showing `file` (or all views) up to date.

@@ -514,3 +514,54 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 	color: var(--text-accent);
 	cursor: pointer;
 }
+
+/* ===== Keep's bars in the pop-up on phones =====
+   Top: back (left), pin, reminder, archive. Bottom: "+", colour, undo/redo, "⋮".
+   Both stay put while the note scrolls. */
+.fkm-bottom-bar {
+	display: none;
+}
+
+.is-phone .kg-edit-modal .fkm-bottom-bar,
+.is-phone .fkm-new-note-modal .fkm-bottom-bar {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: space-between;
+	padding: 6px 8px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+}
+
+.fkm-bottom-group {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.fkm-bottom-button {
+	padding: 8px;
+}
+
+/* Only pin, reminder and archive stay at the top. */
+.is-phone .kg-edit-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button),
+.is-phone .fkm-new-note-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button) {
+	display: none !important;
+}
+
+.is-phone .kg-edit-modal .view-header,
+.is-phone .fkm-new-note-modal .view-header {
+	padding: 8px 4px 4px 56px !important; /* room for the back arrow on the left */
+}
+
+/* The pop-up's empty title row: the top bar moves up, level with the back arrow. */
+.is-phone .kg-edit-modal > .modal-header,
+.is-phone .fkm-new-note-modal > .modal-header {
+	display: none;
+}
+
+/* The pop-up's close button becomes Keep's back arrow, top left. */
+.is-phone .modal .fkm-back-button {
+	left: var(--size-4-3, 12px) !important;
+	right: auto !important;
+}

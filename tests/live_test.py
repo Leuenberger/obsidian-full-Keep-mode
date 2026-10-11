@@ -373,8 +373,20 @@ def main():
             const input = document.querySelector('.fkm-label-modal .fkm-label-input');
             input.value = 'Errands'; input.dispatchEvent(new Event('input'));
             input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await wait(800);""")
-        key("Escape", 27)  # closes the label pop-up
+        ob.js(PRELUDE + "document.querySelector('.fkm-label-modal .modal-header-button, .fkm-label-modal .modal-close-button')?.click(); await wait(400);")
         check("the label button below the note adds a new label", frontmatter("editing").get("tags") == ["Shopping", "Errands"], frontmatter("editing"))
+        bars = ob.js(PRELUDE + """const bar = window.__tcLeaf.view.containerEl.querySelector('.fkm-bottom-bar');
+            const buttons = [...bar.querySelectorAll('.fkm-bottom-button')].map(b => b.getAttribute('aria-label'));
+            bar.querySelector('[aria-label="Add"]').click(); await wait(300);
+            const add = [...document.querySelectorAll('.menu .menu-item')].map(i => i.innerText.trim());
+            document.querySelector('.menu')?.remove();
+            bar.querySelector('[aria-label="More"]').click(); await wait(300);
+            const more = [...document.querySelectorAll('.menu .menu-item')].map(i => i.innerText.trim());
+            document.querySelector('.menu')?.remove();
+            return { buttons, add, more };""")
+        check("Keep's bottom bar (phones): +, colour, undo, redo, ⋮ with Keep's menus",
+              bars["buttons"] == ["Add", "Colour", "Undo", "Redo", "More"] and bars["add"][0] == "Hide checkboxes"
+              and bars["more"][:3] == ["Delete", "Make a copy", "Labels"], bars)
         gap = ob.js("""const l = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.cm-line.HyperMD-task-line');
             return Math.round(l.querySelector('input').getBoundingClientRect().left - l.querySelector('.fkm-grip').getBoundingClientRect().right);""")
         check("the grip sits right next to the checkbox", 0 <= gap <= 4, gap)
@@ -474,7 +486,11 @@ def main():
             ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card C.md');
                 await app.vault.modify(f, (await app.vault.read(f)) + 'A zebra crossing\\n'); await wait(800);
                 const input = window.__fkmBoard.view.containerEl.querySelector('.fkm-search input');
-                input.value = 'zebra'; input.dispatchEvent(new Event('input')); await wait(1500);""")
+                input.value = 'zebra'; input.dispatchEvent(new Event('input')); await wait(500);""")
+            for _ in range(10):  # the search reads all notes; give it time on a big vault
+                if card_order() == ["Card C"]:
+                    break
+                time.sleep(0.5)
             check("searching finds notes by their text", card_order() == ["Card C"], card_order())
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-search-clear').click(); await wait(1500);")
             check("…and clearing the search shows all again", len(card_order()) == 3, card_order())
