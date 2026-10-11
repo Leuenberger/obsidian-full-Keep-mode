@@ -1,0 +1,107 @@
+/* Tidy Checklists */
+
+/* ----- Drag grip: floats left of the checkbox, taking no space ----- */
+.tc-grip {
+	position: absolute;
+	display: inline-flex;
+	align-items: center;
+	width: 18px;
+	height: 1.5em;
+	transform: translateX(-22px);
+	color: var(--text-faint);
+	cursor: grab;
+	opacity: 0;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.tc-grip svg {
+	width: 14px;
+	height: 14px;
+}
+
+.cm-line:hover .tc-grip,
+.is-mobile .tc-grip {
+	opacity: 0.6;
+}
+
+.tc-grip:active {
+	cursor: grabbing;
+}
+
+.cm-line.tc-item-dragging {
+	opacity: 0.4;
+}
+
+/* Where a dragged item will land. */
+.tc-drop-indicator {
+	position: fixed;
+	height: 2px;
+	background: var(--interactive-accent);
+	pointer-events: none;
+	z-index: var(--layer-dragged-item, 1000);
+	display: none;
+}
+
+.tc-drop-indicator.is-visible {
+	display: block;
+}
+
+/* ----- Multi-line items: every line starts under the item's text -----
+   The plugin measures --tc-hang-N and --tc-spacer-N per indent level N. */
+.tc-extra-spacer {
+	display: inline-block;
+}
+
+.cm-line.tc-task.tc-depth-0, .cm-line.tc-extra.tc-depth-0 { padding-inline-start: var(--tc-hang-0, 31px) !important; text-indent: calc(-1 * var(--tc-hang-0, 31px)) !important; }
+.cm-line.tc-task.tc-depth-1, .cm-line.tc-extra.tc-depth-1 { padding-inline-start: var(--tc-hang-1, 67px) !important; text-indent: calc(-1 * var(--tc-hang-1, 67px)) !important; }
+.cm-line.tc-task.tc-depth-2, .cm-line.tc-extra.tc-depth-2 { padding-inline-start: var(--tc-hang-2, 103px) !important; text-indent: calc(-1 * var(--tc-hang-2, 103px)) !important; }
+.cm-line.tc-task.tc-depth-3, .cm-line.tc-extra.tc-depth-3 { padding-inline-start: var(--tc-hang-3, 139px) !important; text-indent: calc(-1 * var(--tc-hang-3, 139px)) !important; }
+.cm-line.tc-task.tc-depth-4, .cm-line.tc-extra.tc-depth-4 { padding-inline-start: var(--tc-hang-4, 175px) !important; text-indent: calc(-1 * var(--tc-hang-4, 175px)) !important; }
+.cm-line.tc-task.tc-depth-5, .cm-line.tc-extra.tc-depth-5 { padding-inline-start: var(--tc-hang-5, 211px) !important; text-indent: calc(-1 * var(--tc-hang-5, 211px)) !important; }
+
+.tc-extra-spacer.tc-depth-0 { width: var(--tc-spacer-0, 31px); }
+.tc-extra-spacer.tc-depth-1 { width: var(--tc-spacer-1, 31px); }
+.tc-extra-spacer.tc-depth-2 { width: var(--tc-spacer-2, 31px); }
+.tc-extra-spacer.tc-depth-3 { width: var(--tc-spacer-3, 31px); }
+.tc-extra-spacer.tc-depth-4 { width: var(--tc-spacer-4, 31px); }
+.tc-extra-spacer.tc-depth-5 { width: var(--tc-spacer-5, 31px); }
+
+/* ----- "N ticked items" divider and ghost parents ----- */
+.tc-ticked-section {
+	margin: 6px 0 2px;
+	padding-top: 6px;
+	border-top: 1px solid var(--background-modifier-border);
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.tc-ticked-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.tc-ghost-group {
+	margin-top: 4px;
+}
+
+.tc-ghost-item {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	padding: 1px 0 1px 20px;
+}
+
+.tc-ghost-parent {
+	opacity: 0.5;
+}
+
+.tc-ghost-child {
+	padding-left: 48px;
+}
+
+.tc-ghost-child .tc-ghost-text {
+	text-decoration: line-through;
+	color: var(--text-muted);
+}
