@@ -114,8 +114,8 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
   Editing the title renames the note too.
 - **Archive** with "Undo" in the confirmation.
 - **Reminders** pop up as a notice in Obsidian, plus a system notification on a
-  computer. Reminders that fell due while Obsidian was closed are shown when you
-  open it.
+  computer. Each new reminder is also offered to your device's calendar (one
+  tap to add it), so you're notified at the time even when Obsidian is closed.
 - **Show / hide checkboxes** (⋮ menu) turns a note's lines into a checklist and
   back.
 
@@ -222,8 +222,12 @@ Manually: download `main.js`, `manifest.json` and `styles.css` from the
 
 ## Good to know
 
-Reminders show up while Obsidian is open, and ones you missed appear when you
-open it. Unlike Keep, Obsidian can't wake your phone for a reminder.
+Obsidian doesn't let plugins schedule notifications themselves, so a reminder
+reaches you through your calendar: when you set one, your calendar app asks to
+add it, and then notifies you at the time, even with Obsidian closed. If you
+change or remove the reminder later, change it in the calendar too. (You can
+turn this off in the settings; Obsidian then shows reminders while it's open,
+and ones you missed when you open it.)
 
 ## Development
 

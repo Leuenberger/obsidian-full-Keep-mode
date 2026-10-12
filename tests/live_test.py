@@ -619,12 +619,27 @@ def main():
         ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').click(); await wait(400);")
         picks = ob.js("return [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick span:first-child')].map(s => s.textContent);")
         check("the bell opens Keep's quick picks", "Tomorrow" in picks and "Next week" in picks, picks)
-        ob.js(PRELUDE + """
-            [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick')].find(b => b.textContent.startsWith('Tomorrow')).click();
-            await wait(700);""")
+        # Opening the calendar file is replaced here, so no calendar app opens during the tests.
+        opened = ob.js(PRELUDE + """
+            const realOpen = app.openWithDefaultApp;
+            const opened = [];
+            app.openWithDefaultApp = async path => { opened.push(path); };
+            try {
+                [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick')].find(b => b.textContent.startsWith('Tomorrow')).click();
+                await wait(900);
+            } finally {
+                app.openWithDefaultApp = realOpen;
+            }
+            const ics = opened.length ? await app.vault.adapter.read(opened[0]) : null;
+            return { opened, ics };""")
         tomorrow = ob.js("return moment().add(1, 'day').format('YYYY-MM-DD') + 'T08:00';")
         check("\"Tomorrow\" sets the reminder to 8:00 tomorrow", frontmatter("archive").get("keep_reminder") == tomorrow, frontmatter("archive"))
         check("…and the bell shows it", ob.js("return window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').classList.contains('has-reminder');"))
+        ics = opened["ics"] or ""
+        start = tomorrow.replace("-", "").replace(":", "") + "00"
+        check("…and it goes to the calendar, with an alert at that time",
+              len(opened["opened"]) == 1 and f"DTSTART:{start}" in ics and "BEGIN:VALARM" in ics and "TRIGGER:PT0M" in ics
+              and "obsidian://open?vault=" in ics, opened)
 
         fired = ob.js(PRELUDE + """
             const plugin = app.plugins.plugins["full-keep-mode"];
