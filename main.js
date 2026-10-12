@@ -72,9 +72,17 @@ const COLORS = [
 	{ id: "green", name: "Green", hex: "#ccff90" },
 	{ id: "cyan", name: "Teal", hex: "#a8f0e0" },
 	{ id: "blue", name: "Blue", hex: "#aecbfa" },
+	{ id: "cerulean", name: "Dark blue", hex: "#aeccdc" },
 	{ id: "purple", name: "Purple", hex: "#d7aefb" },
 	{ id: "pink", name: "Pink", hex: "#fdcfe8" },
+	{ id: "brown", name: "Brown", hex: "#e6c9a8" },
+	{ id: "gray", name: "Grey", hex: "#e8eaed" },
 ];
+// Keep's colour names (in exports) -> ours.
+const KEEP_COLORS = {
+	RED: "red", ORANGE: "orange", YELLOW: "yellow", GREEN: "green", TEAL: "cyan", BLUE: "blue",
+	CERULEAN: "cerulean", PURPLE: "purple", PINK: "pink", BROWN: "brown", GRAY: "gray",
+};
 
 // The board the "Create a Keep board" command sets up. Newest notes come first;
 // a note dragged to a new place gets a keep_order between its neighbours'.
@@ -858,6 +866,10 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 			.setName("Keep board")
 			.setDesc("Run the command \"Create a Keep board\" to get a board of all notes (and an Archive view of it).")
 			.addButton(b => b.setButtonText("Create a Keep board").onClick(() => void this.plugin.createBoard()));
+		new obsidian.Setting(containerEl)
+			.setName("Import from Google Keep")
+			.setDesc("Bring your notes over from Keep: from the Full Keep Mode export (everything, including the order of your notes and checklist sub-items) or from Google Takeout.")
+			.addButton(b => b.setButtonText("Import…").onClick(() => new ImportModal(this.plugin).open()));
 		toggle("Hide properties", "Like Keep, notes don't show their properties above the text. (They stay in the note; see them in Obsidian's \"File properties\" side panel.)", "hideProperties");
 		toggle("Keep titles", `Imported notes show their Keep title (property "${TITLE_PROPERTY}"), also where the file name can't hold it, like "Sept/Oct 2026". Editing the title renames the note too.`, "keepTitles");
 		toggle("Labels and edit date below the note", "Like Keep: the note's tags as labels, and when it was last edited (hover for when it was created).", "noteFooter");
@@ -955,6 +967,11 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			id: "open-labels",
 			name: "Open the labels side menu",
 			callback: () => void this.openLabelsView(),
+		});
+		this.addCommand({
+			id: "import-keep",
+			name: "Import from Google Keep",
+			callback: () => new ImportModal(this).open(),
 		});
 		this.addCommand({
 			id: "create-board",
@@ -1851,8 +1868,10 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	// The title shown for a note: its Keep title, its name, or none for the names Keep's
 	// import and Obsidian give untitled notes ("2021-07-03 202024-633000 0000", "Untitled 2").
 	titleOf(file) {
-		const title = this.settings.keepTitles ? this.frontmatterOf(file)[TITLE_PROPERTY] : null;
+		const fm = this.frontmatterOf(file);
+		const title = this.settings.keepTitles ? fm[TITLE_PROPERTY] : null;
 		if (typeof title === "string" && title.trim()) return title.trim();
+		if (title === "" || title === null && TITLE_PROPERTY in fm) return ""; // an untitled Keep note
 		const name = file.basename.trim();
 		if (/^\d{4}-\d\d-\d\d \d{6}-\d{6} \d{4}$/.test(name)) return "";
 		if (/^(Untitled|Unbenannt|Sans titre|Sin título|Senza titolo|Naamloos)( \d+)?$/i.test(name)) return "";
@@ -2207,6 +2226,195 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		});
 	}
 
+	// ----- importing from Google Keep ---------------------------------------------------------
+	// Two sources: the export of tools/keep_export.py (everything, with the order of the
+	// notes and checklist sub-items), or Google Takeout (no order, no sub-items).
+	// `source.files`: [{ path, name, text(), bytes() }] of the chosen folder.
+
+	readKeepSource(source) {
+		const json = source.files.filter(f => f.name.endsWith(".json"));
+		const full = json.find(f => f.name === "notes.json");
+		return { kind: full ? "export" : json.length ? "takeout" : null, full, json };
+	}
+
+	async loadKeepNotes(source) {
+		const { kind, full, json } = this.readKeepSource(source);
+		if (kind === "export") {
+			const data = JSON.parse(await full.text());
+			if (data.format !== "full-keep-mode-export") throw new Error("notes.json isn't a Full Keep Mode export.");
+			return { kind, notes: data.notes };
+		}
+		if (kind !== "takeout") throw new Error("No Keep notes found in that folder.");
+		const usec = value => (value ? new Date(Number(value) / 1000).toISOString() : null);
+		const notes = [];
+		for (const file of json) {
+			let t;
+			try {
+				t = JSON.parse(await file.text());
+			} catch {
+				continue;
+			}
+			if (!("createdTimestampUsec" in t) || !("isTrashed" in t)) continue; // not a Keep note
+			notes.push({
+				title: t.title ?? "",
+				type: t.listContent ? "list" : "note",
+				text: t.textContent ?? "",
+				items: (t.listContent ?? []).map(i => ({ text: i.text ?? "", checked: !!i.isChecked, children: [] })),
+				color: String(t.color ?? "DEFAULT").toUpperCase(),
+				pinned: !!t.isPinned,
+				archived: !!t.isArchived,
+				trashed: !!t.isTrashed,
+				order: Math.round(Number(t.createdTimestampUsec ?? 0) / 1000), // Takeout has no order: newest first
+				labels: (t.labels ?? []).map(l => l.name).filter(Boolean),
+				created: usec(t.createdTimestampUsec),
+				edited: usec(t.userEditedTimestampUsec),
+				links: [],
+				media: (t.attachments ?? []).map(a => a.filePath).filter(Boolean),
+			});
+		}
+		return { kind, notes };
+	}
+
+	// A Keep note as Markdown with Full Keep Mode's properties.
+	keepMarkdown(note, name, embeds) {
+		const unit = indentUnit(this.app);
+		const yaml = value => JSON.stringify(value);
+		const front = [];
+		const title = (note.title ?? "").trim();
+		if (title !== name) front.push(`${TITLE_PROPERTY}: ${yaml(title)}`); // "" = no title, like in Keep
+		if (note.order) front.push(`${ORDER_PROPERTY}: ${note.order}`);
+		const color = KEEP_COLORS[note.color];
+		if (color) front.push(`${COLOR_PROPERTY}: ${color}`);
+		if (note.pinned) front.push(`${PIN_PROPERTY}: true`);
+		if (note.archived) front.push(`${ARCHIVE_PROPERTY}: true`);
+		const labels = [...new Set((note.labels ?? []).map(l => LabelModal.cleanName(l)).filter(Boolean))];
+		if (labels.length) front.push("tags:", ...labels.map(l => `  - ${yaml(l)}`));
+		const stamp = iso => (iso ? String(iso).replace(/\.\d+Z?$|Z$/, "") : null);
+		if (note.created) front.push(`${CREATED_PROPERTY}: ${stamp(note.created)}`);
+		if (note.edited) front.push(`keep_updated: ${stamp(note.edited)}`);
+		if (note.serverId) front.push(`keep_url: ${yaml(`https://keep.google.com/#NOTE/${note.serverId}`)}`);
+
+		const body = [...embeds];
+		if (note.type === "list") {
+			// Keep's items with their sub-items, ticked ones moved down like the plugin
+			// does. Keep shows two levels, also where its data nests deeper.
+			const items = [];
+			const add = (item, depth) => {
+				const [first, ...rest] = String(item.text ?? "").split("\n");
+				const indent = unit.useTab ? "\t".repeat(depth) : " ".repeat(unit.tabSize * depth);
+				const inner = unit.useTab ? "\t".repeat(depth + 1) : " ".repeat(unit.tabSize * (depth + 1));
+				items.push({
+					indent, depth, origDepth: depth, bullet: "-", mark: item.checked ? "x" : " ", checked: !!item.checked,
+					text: first, extra: rest.map(line => inner + line),
+				});
+				for (const child of item.children ?? []) add(child, Math.min(depth + 1, 1));
+			};
+			for (const item of note.items ?? []) add(item, 0);
+			const ordered = this.settings.sinkTicked ? sinkItems(items) : items;
+			if (ordered.length) body.push(ordered.map(item => renderItem(item, unit)).join("\n"));
+		} else if (note.text) {
+			body.push(note.text);
+		}
+		return (front.length ? `---\n${front.join("\n")}\n---\n` : "") + body.join("\n") + "\n";
+	}
+
+	// The note's file name: its title, else the start of its text.
+	keepFileName(note, taken) {
+		const firstLine = (note.text || note.items?.[0]?.text || "").split("\n")[0];
+		let base = this.safeName((note.title ?? "").trim()) || this.safeName(firstLine).slice(0, 40).trim() || "Untitled";
+		base = base.replace(/^\.+/, "").trim() || "Untitled";
+		// Long titles make file paths too long for some systems; the full title stays the
+		// note's Keep title.
+		if (base.length > 80) base = (base.slice(0, 80).replace(/\s+\S*$/, "") || base.slice(0, 80)).trim();
+		let name = base;
+		for (let i = 2; taken(name); i++) name = `${base} ${i}`;
+		return name;
+	}
+
+	async importKeep(source, folderName, report = () => {}) {
+		this.importing = true;
+		try {
+			return await this.importKeepNotes(source, folderName, report);
+		} finally {
+			this.importing = false;
+			if (this.boardsWaiting) {
+				this.boardsWaiting = false;
+				this.boards.forEach(board => board.renderSoon());
+			}
+		}
+	}
+
+	async importKeepNotes(source, folderName, report) {
+		const { kind, notes } = await this.loadKeepNotes(source);
+		const folder = obsidian.normalizePath(folderName || "Keep");
+		if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+		const byName = new Map(source.files.map(f => [f.name, f]));
+		const fs = obsidian.Platform.isDesktopApp && typeof window.require === "function" ? window.require("fs") : null;
+		const result = { kind, imported: 0, skipped: 0, files: 0, missingFiles: 0, subItems: 0 };
+		// First the names of all notes, so links between Keep notes become Obsidian links.
+		const names = new Map(); // note -> file name
+		const taken = new Set();
+		for (const note of notes) {
+			if (note.trashed) continue;
+			const name = this.keepFileName(note, n => taken.has(n.toLowerCase()) || !!this.app.vault.getAbstractFileByPath(`${folder}/${n}.md`));
+			taken.add(name.toLowerCase());
+			names.set(note, name);
+		}
+		const byKeepId = new Map();
+		for (const [note, name] of names) {
+			if (note.id) byKeepId.set(note.id, name);
+			if (note.serverId) byKeepId.set(note.serverId, name);
+		}
+		const linkNotes = text => String(text ?? "").replace(/https:\/\/keep\.google\.com\/(?:u\/\d+\/)?#(?:NOTE|LIST)\/([\w.-]+)/g,
+			(url, id) => (byKeepId.has(id) ? `[[${byKeepId.get(id)}]]` : url));
+		const withLinks = note => ({
+			...note,
+			text: linkNotes(note.text),
+			items: (note.items ?? []).map(function fix(item) {
+				return { ...item, text: linkNotes(item.text), children: (item.children ?? []).map(fix) };
+			}),
+		});
+
+		let done = 0;
+		for (const original of notes) {
+			done++;
+			if (original.trashed) {
+				result.skipped++;
+				continue;
+			}
+			const note = withLinks(original);
+			const name = names.get(original);
+			const notePath = `${folder}/${name}.md`;
+			const embeds = [];
+			for (const mediaName of note.media ?? []) {
+				const file = byName.get(String(mediaName).split("/").pop());
+				if (!file) {
+					result.missingFiles++;
+					continue;
+				}
+				const path = await this.app.fileManager.getAvailablePathForAttachment(file.name, notePath);
+				const created = await this.app.vault.createBinary(path, await file.bytes());
+				embeds.push("!" + this.app.fileManager.generateMarkdownLink(created, notePath));
+				result.files++;
+			}
+			const markdown = this.keepMarkdown(note, name, embeds);
+			const created = await this.app.vault.create(notePath, markdown);
+			result.imported++;
+			result.subItems += (note.items ?? []).reduce((sum, item) => sum + (item.children?.length ?? 0), 0);
+			// The note's "Edited" date is Keep's.
+			const edited = note.edited ? new Date(note.edited) : null;
+			if (fs && edited && !isNaN(edited)) {
+				try {
+					fs.utimesSync(this.app.vault.adapter.getFullPath(created.path), edited, edited);
+				} catch {
+					// not important
+				}
+			}
+			if (done % 20 === 0) report(`${done} of ${notes.length} notes…`);
+		}
+		return result;
+	}
+
 	// ----- new notes and the board command ---------------------------------------------------
 
 	// A new note in the Keep pop-up. `list`: it starts as a checklist; `tag`: it gets that
@@ -2349,7 +2557,9 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 	}
 
 	onDataUpdated() {
-		this.renderSoon();
+		// During an import the boards wait, and are drawn once at the end.
+		if (this.plugin.importing) this.plugin.boardsWaiting = true;
+		else this.renderSoon();
 	}
 
 	onClose() {
@@ -2656,6 +2866,10 @@ class LabelModal extends obsidian.Modal {
 
 	// Obsidian tags have no spaces and only letters, digits, "_", "-" and "/".
 	cleanName(text) {
+		return LabelModal.cleanName(text);
+	}
+
+	static cleanName(text) {
 		const name = text.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_\-/]/gu, "");
 		return /^\d+$/.test(name) ? `${name}-` : name;
 	}
@@ -2688,6 +2902,71 @@ class LabelModal extends obsidian.Modal {
 			create.createSpan({ text: `Create "${name}"` });
 			create.addEventListener("click", () => void this.toggle(name, true));
 		}
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+// "Import from Google Keep": choose the export folder (or a Takeout folder), and
+// the notes come in as Full Keep Mode notes.
+class ImportModal extends obsidian.Modal {
+	constructor(plugin) {
+		super(plugin.app);
+		this.plugin = plugin;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		this.modalEl.addClass("fkm-import-modal");
+		this.titleEl.setText("Import from Google Keep");
+		if (!obsidian.Platform.isDesktopApp) {
+			contentEl.createEl("p", { text: "Import on a computer; the notes then sync to your phone like any other notes." });
+			return;
+		}
+		const intro = contentEl.createDiv({ cls: "fkm-import-intro" });
+		intro.createEl("p", { text: "Everything, including the order of your notes on the board and checklist sub-items: export your Keep with the script keep_export.py (see the plugin's README), then choose its folder here." });
+		intro.createEl("p", { text: "Or a Google Takeout of Keep (takeout.google.com): it has your notes, colours, labels, pins and images, but not the order of your notes or checklist sub-items." });
+		let folder = "Keep";
+		new obsidian.Setting(contentEl)
+			.setName("Put the notes in")
+			.setDesc("A folder in your vault.")
+			.addText(t => t.setValue(folder).onChange(value => { folder = value.trim() || "Keep"; }));
+		const input = contentEl.createEl("input", { type: "file", attr: { webkitdirectory: "", multiple: "" } });
+		input.style.display = "none";
+		const status = contentEl.createDiv({ cls: "fkm-import-status" });
+		new obsidian.Setting(contentEl)
+			.setName("Your Keep export")
+			.setDesc("The keep-export folder, or the Keep folder of an unzipped Takeout.")
+			.addButton(b => b.setCta().setButtonText("Choose folder and import…").onClick(() => input.click()));
+		input.addEventListener("change", async () => {
+			const files = [...(input.files ?? [])].map(f => ({
+				path: f.webkitRelativePath || f.name,
+				name: f.name,
+				text: () => f.text(),
+				bytes: () => f.arrayBuffer(),
+			}));
+			if (!files.length) return;
+			status.setText("Importing…");
+			try {
+				const r = await this.plugin.importKeep({ files }, folder, text => status.setText(text));
+				const lines = [`${r.imported} notes imported into "${folder}"`];
+				if (r.files) lines.push(`${r.files} images and files`);
+				if (r.subItems) lines.push(`${r.subItems} sub-items`);
+				if (r.skipped) lines.push(`${r.skipped} notes from Keep's trash left out`);
+				if (r.missingFiles) lines.push(`${r.missingFiles} files not found in the folder`);
+				status.setText(lines.join(" · ") + ".");
+				if (r.kind === "takeout") {
+					status.createEl("p", { text: "From Takeout: the board shows the newest notes first, and checklist sub-items came in flat." });
+				}
+				const hasBoard = this.app.vault.getFiles().some(f => f.extension === "base");
+				if (!hasBoard) await this.plugin.createBoard();
+			} catch (error) {
+				console.error("[Full Keep Mode] Import failed:", error);
+				status.setText(`Couldn't import: ${error.message}`);
+			}
+		});
 	}
 
 	onClose() {

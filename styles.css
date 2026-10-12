@@ -585,6 +585,10 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 .fkm-color-blue { --fkm-note-bg: color-mix(in srgb, var(--color-blue) 15%, var(--background-primary)); }
 .fkm-color-purple { --fkm-note-bg: color-mix(in srgb, var(--color-purple) 15%, var(--background-primary)); }
 .fkm-color-pink { --fkm-note-bg: color-mix(in srgb, var(--color-pink) 15%, var(--background-primary)); }
+/* Keep's colours that Obsidian's theme has no variable for. */
+.fkm-color-cerulean { --fkm-note-bg: color-mix(in srgb, #2f6f9f 22%, var(--background-primary)); }
+.fkm-color-brown { --fkm-note-bg: color-mix(in srgb, #94683d 20%, var(--background-primary)); }
+.fkm-color-gray { --fkm-note-bg: color-mix(in srgb, var(--text-muted) 16%, var(--background-primary)); }
 
 /* Everything inside takes the colour as its background. */
 .fkm-note-colored > .workspace-leaf-content,
@@ -917,4 +921,15 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
    Notes and Archive. The .base file can still be edited as text. */
 .workspace-leaf-content[data-type="bases"]:has(.fkm-board) .bases-header {
 	display: none;
+}
+
+/* ===== Import from Google Keep ===== */
+.fkm-import-intro p {
+	margin: 0 0 8px;
+	color: var(--text-muted);
+}
+
+.fkm-import-status {
+	margin-top: 8px;
+	white-space: pre-wrap;
 }

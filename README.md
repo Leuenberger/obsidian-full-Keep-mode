@@ -43,6 +43,7 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
 | Show / hide checkboxes | ✓ |
 | Note opens over the board (full screen on phones) | ✓ with Keep's top and bottom bars on phones |
 | Labels and "Edited …" below the note | ✓ |
+| Your notes from Keep | ✓ imported with their order, colours, labels and checklist sub-items |
 
 ## Checklists, just like Keep's
 
@@ -112,6 +113,44 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
   open it.
 - **Show / hide checkboxes** (⋮ menu) turns a note's lines into a checklist and
   back.
+
+## Moving from Google Keep
+
+The command **Import from Google Keep** (or the button in the plugin's
+settings) brings your notes over, ready for the board. There are two ways to
+get them out of Keep:
+
+**Everything (recommended): the export script.** It keeps the order of your
+notes on the board and the sub-items of your checklists, which Google's own
+export leaves out, plus everything else: text, ticks, colours, pins, archive,
+labels, images, dates and links between notes.
+
+1. Install [Python](https://www.python.org/downloads/), then:
+   `pip install gkeepapi gpsoauth requests`
+2. Download [`tools/keep_export.py`](tools/keep_export.py).
+3. Get a one-time sign-in code: open
+   <https://accounts.google.com/EmbeddedSetup>, sign in and click "I agree"
+   (the page may keep loading; that's fine). Then open the browser's developer
+   tools → Application (Chrome) or Storage (Firefox) → Cookies →
+   accounts.google.com, and copy the value of `oauth_token`.
+4. Run `python keep_export.py you@gmail.com` and paste the code when asked.
+   It's typed invisibly, used once to sign in, and never saved.
+5. In Obsidian, run **Import from Google Keep** and choose the `keep-export`
+   folder the script made.
+
+The script only reads from Keep. Google has no official way for apps to read
+Keep, so it uses [gkeepapi](https://github.com/kiwiz/gkeepapi), the unofficial
+library other Keep tools use too.
+
+**Quick: Google Takeout.** At [takeout.google.com](https://takeout.google.com),
+select only Keep, download and unzip it, then run **Import from Google Keep**
+and choose its `Keep` folder. Takeout has your notes, ticks, colours, pins,
+archive, labels and images, but **not** the order of your notes (the board then
+shows the newest first) and **not** checklist sub-items (they come in flat).
+
+Either way: notes from Keep's trash are left out, and reminders aren't part of
+either export (Keep keeps them in Google Tasks). Import on a computer; the notes
+then reach your phone like any other notes.
 
 ## Getting started
 

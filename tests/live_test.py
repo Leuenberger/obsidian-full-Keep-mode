@@ -423,6 +423,53 @@ def main():
             return { file: f.basename, title: app.metadataCache.getFileCache(f)?.frontmatter?.keep_title };""")
         check("editing the title updates keep_title and renames the note", renamed == {"file": "CD list", "title": "C/D list"}, renamed)
 
+        print("Import from Google Keep")
+        export = {
+            "format": "full-keep-mode-export", "version": 1,
+            "notes": [
+                {"id": "a", "serverId": "srvA", "type": "list", "title": "Packing", "text": "", "order": 300,
+                 "items": [
+                     {"text": "Parent", "checked": False, "children": [
+                         {"text": "Child 1", "checked": False, "children": [{"text": "Grandchild", "checked": False, "children": []}]},
+                         {"text": "Child 2", "checked": True, "children": []}]},
+                     {"text": "Done", "checked": True, "children": []},
+                     {"text": "Two lines\nsecond line", "checked": False, "children": []}],
+                 "color": "CERULEAN", "pinned": True, "archived": False, "trashed": False,
+                 "labels": ["Book club"], "created": "2024-11-10T02:44:02.000Z", "edited": "2024-11-11T03:05:16.000Z",
+                 "links": [], "media": []},
+                {"id": "b", "type": "note", "title": "Links", "text": "See https://keep.google.com/u/0/#NOTE/srvA please",
+                 "items": [], "order": 200, "color": "GRAY", "pinned": False, "archived": True, "trashed": False,
+                 "labels": [], "created": None, "edited": None, "links": [], "media": []},
+                {"id": "c", "type": "note", "title": "", "text": "Buy milk\nand bread", "items": [], "order": 100,
+                 "color": "DEFAULT", "pinned": False, "archived": False, "trashed": False, "labels": [],
+                 "created": None, "edited": None, "links": [], "media": []},
+                {"id": "d", "type": "note", "title": "Old", "text": "gone", "items": [], "order": 50, "color": "DEFAULT",
+                 "pinned": False, "archived": False, "trashed": True, "labels": [], "created": None, "edited": None,
+                 "links": [], "media": []},
+            ]}
+        imported = ob.js(PRELUDE + f"""
+            const p = app.plugins.plugins['full-keep-mode'];
+            const json = {json.dumps(json.dumps(export))};
+            const r = await p.importKeep({{ files: [{{ path: 'keep-export/notes.json', name: 'notes.json', text: async () => json, bytes: async () => new ArrayBuffer(0) }}] }}, FOLDER + '/import');
+            await wait(1500);
+            const read = n => app.vault.read(app.vault.getAbstractFileByPath(FOLDER + '/import/' + n + '.md'));
+            const fm = n => app.metadataCache.getFileCache(app.vault.getAbstractFileByPath(FOLDER + '/import/' + n + '.md'))?.frontmatter ?? {{}};
+            return {{ r, packing: await read('Packing'), links: await read('Links'), milk: await read('Buy milk'),
+                      packingFm: fm('Packing'), linksFm: fm('Links'),
+                      milkTitle: p.titleOf(app.vault.getAbstractFileByPath(FOLDER + '/import/Buy milk.md')) }};""")
+        r = imported["r"]
+        check("all notes come in (Keep's trash is left out)", r["imported"] == 3 and r["skipped"] == 1, r)
+        packing = imported["packing"].split("---\n")[-1]
+        check("checklists keep their order, sub-items and ticks (two levels, like Keep)",
+              packing == "- [ ] Parent\n\t- [ ] Child 1\n\t- [ ] Grandchild\n\t- [x] Child 2\n- [ ] Two lines\n\tsecond line\n- [x] Done\n", repr(packing))
+        fm = imported["packingFm"]
+        check("the board order, pin, colour, labels and dates come along",
+              fm.get("keep_order") == 300 and fm.get("keep_pinned") is True and fm.get("keep_color") == "cerulean"
+              and fm.get("tags") == ["Book-club"] and fm.get("keep_created") == "2024-11-10T02:44:02", fm)
+        check("archived and grey notes too", imported["linksFm"].get("keep_archived") is True and imported["linksFm"].get("keep_color") == "gray", imported["linksFm"])
+        check("links to other Keep notes become Obsidian links", "See [[Packing]] please" in imported["links"], imported["links"])
+        check("an untitled Keep note shows no title", imported["milkTitle"] == "" and "Buy milk" in imported["milk"], imported)
+
         print("Settings and opt-out")
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})
         click_checkbox("A")
