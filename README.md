@@ -45,14 +45,19 @@ reminders, quick notes, and checklists that tidy themselves up the way Keep's do
 - **Drag cards** to reorder the board: with the mouse, or hold a card and drag
   it on a phone or tablet. A dragged card takes the place of the card you drop
   it on.
+- **The board** shows your notes as Keep's cards, in columns: "Pinned" first,
+  then "Others", each card with its colour, title, text or unticked items
+  ("+ 3 ticked items"), first image, reminder and labels. Tick items right on
+  the card. On a computer, hovering a card shows the pin and Keep's buttons
+  (reminder, colour, archive, more); right-click or hold a card for its menu.
+  Clicking a card opens the note in a pop-up (the whole screen on phones).
 - **"Create a Keep board"** sets up a ready-made board: newest notes first,
   pinned ones on top, archived notes in a separate Archive view.
 
-The board itself is drawn by the
-[Keep Bases View](https://github.com/k4fn/keep-bases-view) plugin;
-Full Keep Mode adds the rest. Both use the same note properties, `keep_pinned`
-and `keep_color`. A note's place on the board is stored in `keep_order`, its
-archived state in `keep_archived` and its reminder in `keep_reminder`.
+The board is a view of Obsidian's Bases (a `.base` file with views of type
+`keep-board`), so the `.base` file decides which notes are on it. Everything is
+stored in the notes' properties: `keep_pinned`, `keep_color`, `keep_order` (a
+note's place on the board), `keep_archived`, `keep_reminder` and `tags`.
 
 ### Checklists
 
@@ -96,8 +101,8 @@ ordinary `- [ ]` / `- [x]` lists. Nothing is stored anywhere else.
 
 ## Getting started
 
-1. Install **Full Keep Mode** and **Keep Bases View** (Settings → Community
-   plugins → Browse) and enable both.
+1. Install **Full Keep Mode** (Settings → Community plugins → Browse) and
+   enable it. It needs Obsidian 1.10 or later (for Bases); nothing else.
 2. Run the command **Create a Keep board** (Ctrl/Cmd+P).
 3. Optional, to match Keep: turn off **Settings → Editor → Fold indent**, so
    list items can't be collapsed.

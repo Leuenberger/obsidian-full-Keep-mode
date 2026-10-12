@@ -165,23 +165,23 @@ button.fkm-reminder-remove {
 }
 
 /* Dragging cards. */
-.kg-card.fkm-dragging {
+.fkm-card.fkm-dragging {
 	opacity: 0.4;
 }
 
-.kg-card.fkm-drop-target {
+.fkm-card.fkm-drop-target {
 	outline: 2px solid var(--interactive-accent);
 	outline-offset: 2px;
 }
 
 /* Phone: a held card is "lifted" and ready to drag. (No transform: the board
    positions cards with transforms.) */
-.kg-card.fkm-lifted {
+.fkm-card.fkm-lifted {
 	box-shadow: 0 0 0 2px var(--interactive-accent), var(--shadow-l);
 }
 
 /* The copy of the card that follows the pointer while dragging. */
-.kg-card.fkm-drag-ghost {
+.fkm-card.fkm-drag-ghost {
 	position: fixed;
 	top: 0;
 	left: 0;
@@ -200,7 +200,7 @@ body.fkm-card-drag-active {
 }
 
 /* Phone: holding a card must not select its text or open the iOS callout. */
-.is-mobile .kg-card {
+.is-mobile .fkm-card {
 	-webkit-user-select: none;
 	user-select: none;
 	-webkit-touch-callout: none;
@@ -338,7 +338,7 @@ body.fkm-card-drag-active {
 /* ===== Keep pop-up on phones =====
    Obsidian's floating top bar would float over the note inside the pop-up:
    give it its own row at the top instead, without the sidebar button. */
-.is-mobile .kg-edit-modal .view-header,
+.is-mobile .fkm-note-modal .view-header,
 .is-mobile .fkm-new-note-modal .view-header {
 	position: static !important;
 	transform: none !important;
@@ -352,17 +352,17 @@ body.fkm-card-drag-active {
 	background: none;
 }
 
-.is-mobile .kg-edit-modal .workspace-leaf-content,
+.is-mobile .fkm-note-modal .workspace-leaf-content,
 .is-mobile .fkm-new-note-modal .workspace-leaf-content {
 	padding-top: 0 !important;
 }
 
-.is-mobile .kg-edit-modal .view-header-left,
+.is-mobile .fkm-note-modal .view-header-left,
 .is-mobile .fkm-new-note-modal .view-header-left {
 	display: none;
 }
 
-.is-mobile .kg-edit-modal .view-actions,
+.is-mobile .fkm-note-modal .view-actions,
 .is-mobile .fkm-new-note-modal .view-actions {
 	max-width: 100%;
 	overflow-x: auto;
@@ -532,7 +532,7 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 	display: none;
 }
 
-.is-phone .kg-edit-modal .fkm-bottom-bar,
+.is-phone .fkm-note-modal .fkm-bottom-bar,
 .is-phone .fkm-new-note-modal .fkm-bottom-bar {
 	display: flex;
 	flex: 0 0 auto;
@@ -554,18 +554,18 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 }
 
 /* Only pin, reminder and archive stay at the top. */
-.is-phone .kg-edit-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button),
+.is-phone .fkm-note-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button),
 .is-phone .fkm-new-note-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button) {
 	display: none !important;
 }
 
-.is-phone .kg-edit-modal .view-header,
+.is-phone .fkm-note-modal .view-header,
 .is-phone .fkm-new-note-modal .view-header {
 	padding: 8px 4px 4px 56px !important; /* room for the back arrow on the left */
 }
 
 /* The pop-up's empty title row: the top bar moves up, level with the back arrow. */
-.is-phone .kg-edit-modal > .modal-header,
+.is-phone .fkm-note-modal > .modal-header,
 .is-phone .fkm-new-note-modal > .modal-header {
 	display: none;
 }
@@ -605,4 +605,316 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 .fkm-title {
 	outline: none;
 	cursor: text;
+}
+
+/* ===== The board: Keep's cards in columns ===== */
+.fkm-board {
+	position: relative;
+	padding: 0 16px 48px;
+}
+
+.is-phone .fkm-board {
+	padding: 0 8px 96px;
+}
+
+/* The search bar stays at the top while the board scrolls, like Keep's. */
+.fkm-board-top {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	padding: 8px 0 4px;
+	background: var(--background-primary);
+}
+
+.fkm-board-top .fkm-search {
+	margin-top: 8px;
+}
+
+.fkm-board .fkm-take-note {
+	margin-bottom: 24px;
+}
+
+.fkm-board-section-title {
+	max-width: calc(var(--fkm-card-width) * 6);
+	margin: 8px auto 8px;
+	padding: 0 4px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.fkm-board-columns {
+	display: flex;
+	justify-content: center;
+	align-items: flex-start;
+	gap: var(--fkm-card-gap);
+	margin-bottom: 24px;
+}
+
+.fkm-board-column {
+	display: flex;
+	flex-direction: column;
+	gap: var(--fkm-card-gap);
+	width: var(--fkm-card-width);
+	min-width: 0;
+}
+
+/* Cards are measured here before they're placed. */
+.fkm-board-measure {
+	position: absolute;
+	top: 0;
+	left: -10000px;
+	width: var(--fkm-card-width);
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.fkm-board-measure .fkm-card {
+	margin-bottom: 0;
+}
+
+.fkm-board-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 16px;
+	margin-top: 15vh;
+	color: var(--text-muted);
+	font-size: var(--font-ui-large);
+}
+
+.fkm-board-empty-icon svg {
+	width: 96px;
+	height: 96px;
+	stroke-width: 1;
+	opacity: 0.4;
+}
+
+/* ----- A card ----- */
+.fkm-card {
+	position: relative;
+	overflow: hidden;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	cursor: default;
+	transition: box-shadow 0.15s ease;
+}
+
+.fkm-card:hover {
+	box-shadow: var(--shadow-s);
+}
+
+.fkm-card.fkm-card-colored {
+	border-color: transparent;
+	background: var(--fkm-note-bg);
+}
+
+.fkm-card-image {
+	display: block;
+	width: 100%;
+	max-height: 320px;
+	object-fit: cover;
+}
+
+.fkm-card-title {
+	padding: 12px 16px 0;
+	padding-inline-end: 36px; /* room for the pin */
+	font-weight: var(--font-semibold);
+	font-size: 1.05em;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.fkm-card-body {
+	position: relative;
+	max-height: 21em;
+	overflow: hidden;
+	padding: 8px 16px 12px;
+	font-size: 0.9em;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.fkm-card-title + .fkm-card-body {
+	padding-top: 6px;
+}
+
+.is-phone .fkm-card-body {
+	max-height: 14em;
+	padding: 6px 12px 10px;
+}
+
+.is-phone .fkm-card-title {
+	padding: 10px 12px 0;
+}
+
+/* Long notes fade out at the bottom of the card. */
+.fkm-card-body::after {
+	content: "";
+	position: absolute;
+	inset: auto 0 0 0;
+	height: 1.5em;
+	background: linear-gradient(transparent, var(--fkm-note-bg, var(--background-primary)));
+	pointer-events: none;
+}
+
+.fkm-card-text {
+	white-space: pre-wrap;
+}
+
+.fkm-card-blank {
+	height: 0.6em;
+}
+
+.fkm-card-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	padding-inline-start: calc(var(--fkm-depth, 0) * 18px);
+}
+
+.fkm-card-item .fkm-card-check {
+	flex: none;
+	width: 14px;
+	height: 14px;
+	margin: 0.2em 0 0;
+	cursor: pointer;
+}
+
+.fkm-card-ticked,
+.fkm-card-empty {
+	margin-top: 4px;
+	color: var(--text-muted);
+}
+
+.fkm-card-empty {
+	font-size: 1.1em;
+}
+
+.fkm-card-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 0 12px 12px;
+}
+
+.fkm-card-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 8px;
+	border-radius: 12px;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+}
+
+.fkm-card-reminder.is-past {
+	text-decoration: line-through;
+	color: var(--text-muted);
+}
+
+.fkm-card-chip-icon {
+	display: flex;
+}
+
+.fkm-card-chip-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+/* The pin (top right) and the buttons along the bottom show on hover, like Keep's. */
+.fkm-card-pin {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	z-index: 1;
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+.fkm-card:hover .fkm-card-pin {
+	opacity: 1;
+}
+
+.fkm-card-pin.is-pinned svg {
+	fill: currentColor;
+}
+
+.fkm-card-actions {
+	display: flex;
+	gap: 2px;
+	padding: 0 8px 6px;
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+.fkm-card:hover .fkm-card-actions {
+	opacity: 1;
+}
+
+.fkm-card-actions .clickable-icon {
+	padding: 4px;
+}
+
+.fkm-card-actions svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* ===== The note pop-up, like Keep's ===== */
+.modal.fkm-note-modal {
+	width: min(600px, 92vw);
+	max-width: 600px;
+	height: auto;
+	max-height: 85vh;
+	padding: 0;
+	overflow: hidden;
+}
+
+.fkm-note-modal .modal-content {
+	display: flex;
+	flex-direction: column;
+	height: min(85vh, 720px);
+}
+
+.fkm-note-modal .modal-content > .workspace-leaf {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.fkm-note-modal .workspace-leaf-content {
+	flex: 1;
+	min-height: 0;
+}
+
+/* Phones: the whole screen, like Keep's. */
+.is-phone .modal.fkm-note-modal {
+	width: 100vw;
+	max-width: 100vw;
+	height: 100%;
+	max-height: 100%;
+	border-radius: 0;
+	padding-top: var(--safe-area-inset-top, 0px);
+}
+
+.is-phone .fkm-note-modal .modal-content {
+	height: 100%;
+	padding: 0;
+}
+
+/* The back arrow below the status bar, level with the top bar's buttons. */
+.is-phone .modal.fkm-note-modal .fkm-back-button {
+	top: calc(var(--safe-area-inset-top, 0px) + 8px) !important;
+}
+
+/* Keep has no toolbar above the board (views, sort, filter): the side menu has
+   Notes and Archive. The .base file can still be edited as text. */
+.workspace-leaf-content[data-type="bases"]:has(.fkm-board) .bases-header {
+	display: none;
 }

@@ -176,7 +176,7 @@ BOARD = f"""filters:
 formulas:
   board_order: 'if(keep_order, keep_order, number(file.ctime))'
 views:
-  - type: keep-grid-view
+  - type: keep-board
     name: Board
     sort:
       - property: keep_pinned
@@ -209,7 +209,7 @@ def open_board(cards):
 
 def card_order():
     """Cards as they appear on screen: top to bottom, then left to right."""
-    return ob.js("""return [...window.__fkmBoard.view.containerEl.querySelectorAll('.kg-card[data-path]')]
+    return ob.js("""return [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card[data-path]')]
                     .map(c => ({ r: c.getBoundingClientRect(), name: c.getAttribute('data-path').split('/').pop().replace('.md', '') }))
                     .sort((a, b) => Math.round(a.r.top / 20) - Math.round(b.r.top / 20) || a.r.left - b.r.left)
                     .map(c => c.name);""")
@@ -229,7 +229,7 @@ def press_escape():
 
 
 def card_center(name):
-    return ob.js(f"""const c = [...window.__fkmBoard.view.containerEl.querySelectorAll('.kg-card[data-path]')]
+    return ob.js(f"""const c = [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card[data-path]')]
                      .find(c => c.getAttribute('data-path').endsWith('/{name}.md'));
                      const r = c.getBoundingClientRect(); return {{ x: r.left + r.width / 2, y: r.top + 20 }};""")
 
@@ -240,7 +240,7 @@ def frontmatter(name):
 
 
 def modal_open():
-    return ob.js("return [...document.querySelectorAll('.modal-container .kg-edit-modal')].filter(m => !m.closest('[data-tc-hidden]')).length;")
+    return ob.js("return [...document.querySelectorAll('.modal-container .fkm-note-modal')].filter(m => !m.closest('[data-tc-hidden]')).length;")
 
 def scroll_check():
     open_note("scrolling", "".join(f"Line {i}\n" for i in range(80)) + "\n- [ ] A\n- [ ] B\n- [ ] C\n")
@@ -433,11 +433,11 @@ def main():
         grips = ob.js("return window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.fkm-grip').length;")
         check("a note with full-keep-mode: false is left alone", body() == "- [x] A\n- [ ] B" and grips == 0, (body(), grips))
 
-        print("Board (Keep Bases View)")
-        has_board = ob.js("return !!app.plugins.plugins['keep-bases-view'];")
+        print("Board")
+        has_board = ob.js("return typeof app.plugins.plugins['full-keep-mode'].registerBasesView === 'function';")
         hidden = ob.js("return document.visibilityState === 'hidden';")
         if not has_board:
-            print("  skipped: the Keep Bases View plugin isn't enabled")
+            print("  skipped: this Obsidian has no Bases (1.10 or later needed)")
         elif hidden:
             # A hidden window (minimised, covered, screen off) doesn't draw, so the board
             # never lays out its cards and mouse drags stall.
@@ -445,7 +445,7 @@ def main():
         else:
             open_board({"Card A": 300, "Card B": 200, "Card C": 100})
             bar = ob.js("""const el = window.__fkmBoard.view.containerEl;
-                return { inBoard: !!el.querySelector('.fkm-take-note'), boards: el.querySelectorAll('.kg-container').length,
+                return { inBoard: !!el.querySelector('.fkm-take-note'), boards: el.querySelectorAll('.fkm-board').length,
                          anywhere: document.querySelectorAll('.fkm-take-note').length };""")
             check("the board has a \"Take a note…\" bar", bar["inBoard"], bar)
             check("cards are in board order", card_order() == ["Card A", "Card B", "Card C"], card_order())
@@ -466,19 +466,31 @@ def main():
             ob.mouse("mouseReleased", b["x"], b["y"])
             time.sleep(1.5)
             check("clicking a card still opens it in the pop-up", modal_open() == 1)
-            labels = ob.js("return [...document.querySelectorAll('.kg-edit-modal .view-actions .clickable-icon')].map(b => b.getAttribute('aria-label').split('\\n')[0]);")
+            labels = ob.js("return [...document.querySelectorAll('.fkm-note-modal .view-actions .clickable-icon')].map(b => b.getAttribute('aria-label').split('\\n')[0]);")
             check("the pop-up's top bar has Undo, Redo, Pin and Colour", all(x in labels for x in ("Undo", "Redo", "Pin", "Colour")), labels)
-            ob.js(PRELUDE + "document.querySelector('.kg-edit-modal .fkm-pin-button').click(); await wait(800);")
+            ob.js(PRELUDE + "document.querySelector('.fkm-note-modal .fkm-pin-button').click(); await wait(800);")
             check("the Pin button pins the note", frontmatter("Card B").get("keep_pinned") is True, frontmatter("Card B"))
-            ob.js(PRELUDE + """document.querySelector('.kg-edit-modal .fkm-color-button').click(); await wait(400);
+            ob.js(PRELUDE + """document.querySelector('.fkm-note-modal .fkm-color-button').click(); await wait(400);
                 const item = [...document.querySelectorAll('.menu .menu-item')].find(i => i.textContent.trim() === 'Blue');
                 item.click(); await wait(800);""")
             check("the Colour button sets the colour", frontmatter("Card B").get("keep_color") == "blue", frontmatter("Card B"))
-            colored = ob.js(PRELUDE + "await wait(500); return [...document.querySelectorAll('.kg-edit-modal')].pop()?.classList.contains('fkm-color-blue');")
+            colored = ob.js(PRELUDE + "await wait(500); return [...document.querySelectorAll('.fkm-note-modal')].pop()?.classList.contains('fkm-color-blue');")
             check("…and the open pop-up takes the colour, like in Keep", colored, colored)
             press_escape()
             time.sleep(1)
             check("a pinned note moves to the top of the board", card_order()[0] == "Card B", card_order())
+
+            # Cards like Keep's: unticked items, "+ N ticked items"; ticking on a card works.
+            ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card A.md');
+                await app.vault.modify(f, '---\\nkeep_order: 300\\n---\\n- [ ] Milk\\n- [x] Eggs\\n- [ ] Bread\\n'); await wait(1500);""")
+            card = ob.js("""const c = [...document.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card A.md'));
+                return { items: [...c.querySelectorAll('.fkm-card-item-text')].map(e => e.textContent), ticked: c.querySelector('.fkm-card-ticked')?.textContent };""")
+            check("a card shows the unticked items and \"+ 1 ticked item\"", card == {"items": ["Milk", "Bread"], "ticked": "+ 1 ticked item"}, card)
+            ob.js(PRELUDE + """const c = [...document.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card A.md'));
+                c.querySelector('.fkm-card-check').click(); await wait(1500);""")
+            ticked = ob.js(PRELUDE + "return await app.vault.read(app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'));")
+            check("ticking on a card ticks the item and moves it down, like in the note", ticked.endswith("- [ ] Bread\n- [x] Milk\n- [x] Eggs\n"), repr(ticked))
+            check("…and doesn't open the note", modal_open() == 0)
 
             # "Take a note…": an untouched new note is thrown away, one with text stays.
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note').click(); await wait(1500);")
@@ -502,7 +514,7 @@ def main():
 
             # Search bar, labels and "New list".
             order = ob.js("""const el = window.__fkmBoard.view.containerEl;
-                return [...el.querySelectorAll('.kg-container > .fkm-search, .kg-container > .fkm-take-note')].map(e => e.className);""")
+                return [...el.querySelectorAll('.fkm-board .fkm-search, .fkm-board .fkm-take-note')].map(e => e.className);""")
             check("an always-visible search bar above \"Take a note…\"", order == ["fkm-search", "fkm-take-note"], order)
             ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card C.md');
                 await app.vault.modify(f, (await app.vault.read(f)) + 'A zebra crossing\\n'); await wait(800);
