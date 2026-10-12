@@ -312,6 +312,15 @@ def main():
         check("dragging far right still indents only one level",
               body() == "- [ ] A\n→- [ ] A1\n→- [ ] B\n→- [ ] B1\n→- [ ] C", body())
 
+        # The indent button of the phone toolbar runs Obsidian's "Indent list" command.
+        open_note("indent button", "- [ ] A\n- [ ] B\n")
+        indent_cmd = """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc;
+            cm.dispatch({ selection: { anchor: d.line(2).to } });
+            app.commands.executeCommandById('editor:indent-list'); await wait(400);"""
+        ob.js(PRELUDE + indent_cmd)
+        ob.js(PRELUDE + indent_cmd)
+        check("the toolbar's indent button follows the same rules (two levels)", text() == "- [ ] A\n\t- [ ] B\n", repr(text()))
+
         print("Multi-line items")
         long = "word " * 40
         open_note("multiline", HEAD + f"- [ ] First line\n\t\tsecond line\n\t\tthird line {long}\n- [ ] Next {long}")

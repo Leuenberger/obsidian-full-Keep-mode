@@ -803,35 +803,36 @@ function checklistExtension(plugin) {
 	});
 
 	// Tab indents an item once under the item above it, taking its sub-items
-	// along; with two levels (like Keep) they all become sub-items.
-	const tabKey = Prec.highest(keymap.of([{
-		key: "Tab",
-		run: view => {
-			if (!enabledFor(view.state)) return false;
-			const unit = indentUnit(app);
-			const sel = view.state.selection;
-			const doc = view.state.doc;
-			const n = doc.lineAt(sel.main.head).number;
-			const block = findBlock(doc, n, unit);
-			if (!block) return false; // not a checklist: Obsidian's usual Tab
-			if (sel.ranges.length > 1 || doc.lineAt(sel.main.from).number !== doc.lineAt(sel.main.to).number) {
-				return settings().maxIndent > 0; // several lines: leave alone in two-level mode
-			}
-			const index = block.items.findIndex(item => item.line === n);
-			if (index < 0) return true; // an extra line of an item
-			const items = block.items.map(item => ({ ...item }));
-			const base = baseDepth(items);
-			const prev = items[index - 1];
-			const limit = plugin.maxDepth(base, prev);
-			if (!prev || items[index].depth >= limit) return true;
-			const shift = 1;
-			for (let i = index; i < descendantsEnd(items, index); i++) {
-				items[i].depth = Math.min(items[i].depth + shift, plugin.depthCap(base));
-			}
-			writeItems(view, block, settings().sinkTicked ? sinkItems(items) : items, unit);
-			return true;
-		},
-	}]));
+	// along; with two levels (like Keep) they all become sub-items. Also used for
+	// Obsidian's "Indent list" command (the indent button of the phone toolbar).
+	// Returns false outside checklists, where Obsidian's own indenting applies.
+	const indentItem = view => {
+		if (!enabledFor(view.state)) return false;
+		const unit = indentUnit(app);
+		const sel = view.state.selection;
+		const doc = view.state.doc;
+		const n = doc.lineAt(sel.main.head).number;
+		const block = findBlock(doc, n, unit);
+		if (!block) return false; // not a checklist: Obsidian's usual Tab
+		if (sel.ranges.length > 1 || doc.lineAt(sel.main.from).number !== doc.lineAt(sel.main.to).number) {
+			return settings().maxIndent > 0; // several lines: leave alone in two-level mode
+		}
+		const index = block.items.findIndex(item => item.line === n);
+		if (index < 0) return true; // an extra line of an item
+		const items = block.items.map(item => ({ ...item }));
+		const base = baseDepth(items);
+		const prev = items[index - 1];
+		const limit = plugin.maxDepth(base, prev);
+		if (!prev || items[index].depth >= limit) return true;
+		const shift = 1;
+		for (let i = index; i < descendantsEnd(items, index); i++) {
+			items[i].depth = Math.min(items[i].depth + shift, plugin.depthCap(base));
+		}
+		writeItems(view, block, settings().sinkTicked ? sinkItems(items) : items, unit);
+		return true;
+	};
+	plugin.indentChecklistItem = indentItem;
+	const tabKey = Prec.highest(keymap.of([{ key: "Tab", run: indentItem }]));
 
 	// Undo, redo, pin and colour buttons in the note's top bar (also in pop-up editors).
 	const headerButtons = ViewPlugin.fromClass(class {
@@ -978,6 +979,19 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			name: "Create a Keep board",
 			callback: () => this.createBoard(),
 		});
+
+		// Obsidian's "Indent list" command (also the indent button of the phone toolbar)
+		// follows Keep's rules in checklists, like Tab does.
+		const indentCommand = this.app.commands?.commands?.["editor:indent-list"];
+		if (indentCommand?.editorCallback) {
+			const original = indentCommand.editorCallback;
+			indentCommand.editorCallback = (editor, ctx) => {
+				const cm = editor?.cm;
+				if (cm && this.indentChecklistItem?.(cm)) return;
+				return original.call(indentCommand, editor, ctx);
+			};
+			this.register(() => { indentCommand.editorCallback = original; });
+		}
 
 		// Keep's side menu, and its entries in the note's "⋮" menu.
 		this.registerView(LABELS_VIEW, leaf => new LabelsView(leaf, this));

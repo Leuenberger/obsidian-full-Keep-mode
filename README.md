@@ -20,6 +20,11 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
 - **Your notes stay yours.** Every note is an ordinary Markdown file in your
   Obsidian vault: readable in any editor, synced however you like, and usable
   with everything else Obsidian can do (links, search, graph, other plugins).
+- **Made for Obsidian's phone app.** On your phone, notes open full screen
+  with Keep's top and bottom bars, cards and checklists work with your finger,
+  and the side menu is the drawer, just like in Keep's app. With
+  [Obsidian Sync](https://obsidian.md/sync), your board, pins, colours, labels
+  and checklists stay the same on your phone and your computer.
 - **Works offline,** always.
 - **One plugin, nothing else to install.**
 
@@ -215,16 +220,10 @@ Manually: download `main.js`, `manifest.json` and `styles.css` from the
 `<your vault>/.obsidian/plugins/full-keep-mode/`, then enable the plugin under
 **Settings → Community plugins**.
 
-## Limitations
+## Good to know
 
-- Checklists work in the editor (Live Preview and Source mode), not in Reading
-  view.
-- Reminders pop up only while Obsidian is running (missed ones are shown when
-  it opens). Obsidian can't wake a phone the way Keep's reminders do.
-- Labels are tags; Obsidian tags can't contain spaces, so a new label
-  "Book club" becomes "Book-club".
-- On phones, Obsidian's own indent button in the toolbar isn't limited to two
-  levels; Tab and dragging are.
+Reminders show up while Obsidian is open, and ones you missed appear when you
+open it. Unlike Keep, Obsidian can't wake your phone for a reminder.
 
 ## Development
 
