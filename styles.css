@@ -124,8 +124,9 @@ button.fkm-reminder-remove {
 	font-size: var(--font-ui-medium);
 }
 
-.fkm-search-icon {
+.fkm-search-menu {
 	display: flex;
+	color: var(--text-normal);
 }
 
 .fkm-search-clear {

@@ -34,7 +34,8 @@ reminders, quick notes, and checklists that tidy themselves up the way Keep's do
 - **Search bar** always at the top of the board, like Keep's. It finds notes by
   title, label and text.
 - **Labels side menu**, like Keep's: Notes, Reminders, your labels and Archive
-  in the left sidebar (the drawer on phones). Click one to show it on the board.
+  in the left sidebar (the drawer on phones), opened with the ☰ button in the
+  search bar. Click one to show it on the board.
 - **Labels on a note**: the pencil/"+ Label" button below the note (or "Labels"
   in the note's ⋮ menu) opens Keep's "Label note": tick labels or type a new one.
 - **"Take a note…"** at the top of the board opens a new note in a pop-up, title

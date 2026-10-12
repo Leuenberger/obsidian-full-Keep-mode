@@ -1780,9 +1780,12 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const filter = this.filterOf(controller);
 		const bar = createDiv({ cls: "fkm-search" });
 		bar.fkmController = controller;
-		obsidian.setIcon(bar.createSpan({ cls: "fkm-search-icon" }), "search");
+		// Keep's ☰ at the left: opens the side menu with the labels.
+		const menu = bar.createSpan({ cls: "fkm-search-menu clickable-icon", attr: { "aria-label": "Labels and archive" } });
+		obsidian.setIcon(menu, "menu");
+		menu.addEventListener("click", () => void this.toggleLabelsView());
 		const chip = bar.createSpan({ cls: "fkm-search-chip" });
-		const input = bar.createEl("input", { type: "search", placeholder: "Search", value: filter.text });
+		const input = bar.createEl("input", { type: "search", placeholder: "Search your notes", value: filter.text });
 		const clear = bar.createSpan({ cls: "fkm-search-clear clickable-icon", attr: { "aria-label": "Clear search" } });
 		obsidian.setIcon(clear, "x");
 		let timer = null;
@@ -1881,6 +1884,16 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		leaves.filter(leaf => leaf !== keep).forEach(leaf => leaf.detach());
 		// Not drawn yet while it's a tab in the background (it draws itself when shown).
 		return keep?.view instanceof LabelsView ? keep.view : null;
+	}
+
+	// The ☰ button: open the side menu (the drawer on phones), or close it again.
+	async toggleLabelsView() {
+		const split = this.app.workspace.leftSplit;
+		const leaf = this.app.workspace.getLeavesOfType(LABELS_VIEW)[0];
+		const showing = leaf && split && !split.collapsed && leaf.getContainer?.() === split
+			&& (leaf.view instanceof LabelsView) && leaf.view.containerEl.isShown?.();
+		if (showing) split.collapse();
+		else await this.openLabelsView(true);
 	}
 
 	async openLabelsView(reveal = true) {
