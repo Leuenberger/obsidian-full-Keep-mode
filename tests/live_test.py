@@ -387,9 +387,16 @@ def main():
         check("Keep's bottom bar (phones): +, colour, undo, redo, ⋮ with Keep's menus",
               bars["buttons"] == ["Add", "Colour", "Undo", "Redo", "More"] and bars["add"][0] == "Hide checkboxes"
               and bars["more"][:3] == ["Delete", "Make a copy", "Labels"], bars)
-        gap = ob.js("""const l = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.cm-line.HyperMD-task-line');
-            return Math.round(l.querySelector('input').getBoundingClientRect().left - l.querySelector('.fkm-grip').getBoundingClientRect().right);""")
-        check("the grip sits right next to the checkbox", 0 <= gap <= 4, gap)
+        open_note("grips", "- [ ] Parent\n\t- [ ] Child\n")
+        grips = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm;
+            cm.dispatch({ selection: { anchor: cm.state.doc.length } }); await wait(400);
+            const lines = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-task')];
+            const mid = el => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
+            const parent = lines.find(l => l.classList.contains('fkm-depth-0'));
+            const child = lines.find(l => l.classList.contains('fkm-depth-1'));
+            if (!parent || !child) return [...cm.contentDOM.querySelectorAll('.cm-line')].map(l => l.className + ' | ' + l.textContent).join(' // ');
+            return Math.round(mid(child.querySelector('.fkm-grip')) - mid(parent.querySelector('input'))) || 0; /* no -0: it cannot be sent back */""")
+        check("like Keep, a sub-item's grip is right below its parent's checkbox", isinstance(grips, (int, float)) and abs(grips) <= 2, repr(grips))
 
         # Dragging must not scroll the note (on phones it jumped to the top).
         if ob.js("return document.visibilityState === 'hidden';"):

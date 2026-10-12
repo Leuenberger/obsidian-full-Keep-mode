@@ -208,14 +208,28 @@ body.fkm-card-drag-active {
 
 /* ===== Checklists ===== */
 
-/* ----- Drag grip: floats just left of the checkbox, taking no space -----
-   The plugin measures --fkm-grip-shift so it sits right next to the checkbox, like Keep's. */
+/* ----- Like Keep: a smaller indent and a bigger checkbox in checklists ----- */
+.cm-line.fkm-task,
+.cm-line.fkm-extra {
+	--list-indent: 1.75em; /* = STEP_EM in main.js */
+	--checkbox-size: 18px;
+}
+
+/* Keep has no indentation lines; here they'd run through the sub-items' grips. */
+.cm-line.fkm-task .cm-indent::before,
+.cm-line.fkm-extra .cm-indent::before {
+	display: none !important;
+}
+
+/* ----- Drag grip: one indent step left of the checkbox, taking no space -----
+   So a sub-item's grip is right below its parent's checkbox, like Keep's. The plugin
+   measures --fkm-grip-shift and --fkm-grip-width (the step). */
 .fkm-grip {
 	position: absolute;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 20px;
+	width: var(--fkm-grip-width, 24px);
 	height: 1.5em;
 	transform: translateX(var(--fkm-grip-shift, -22px));
 	color: var(--text-faint);
@@ -229,11 +243,6 @@ body.fkm-card-drag-active {
 .fkm-grip svg {
 	width: 20px;
 	height: 20px;
-}
-
-/* A bigger target for fingers. */
-.is-mobile .fkm-grip {
-	width: 24px;
 }
 
 .is-mobile .fkm-grip svg {

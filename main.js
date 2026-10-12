@@ -112,6 +112,7 @@ views:
         direction: DESC
 `;
 const INDENT_STEP = 28; // px of sideways drag per indent level
+const STEP_EM = 1.75; // indent of checklist items (styles.css --fkm-step), like Keep's
 const MAX_STYLED_DEPTH = 5; // indent levels with alignment styles (deeper ones use level 5's)
 
 // ----- reading checklists -----------------------------------------------------------------
@@ -692,10 +693,14 @@ function checklistExtension(plugin) {
 			view.requestMeasure({
 				key: this,
 				read: v => this.read(v),
-				write: ({ gripShift, ...found }, v) => {
+				write: ({ gripShift, gripWidth, ...found }, v) => {
 					if (gripShift !== null && gripShift !== this.gripShift) {
 						this.gripShift = gripShift;
 						v.dom.style.setProperty("--fkm-grip-shift", `${gripShift}px`);
+					}
+					if (gripWidth !== null && gripWidth !== this.gripWidth) {
+						this.gripWidth = gripWidth;
+						v.dom.style.setProperty("--fkm-grip-width", `${gripWidth}px`);
 					}
 					for (const [depth, { hang, spacer }] of Object.entries(found)) {
 						const old = this.values[depth] ?? {};
@@ -743,14 +748,21 @@ function checklistExtension(plugin) {
 			};
 			const hangs = {};
 			const spacerStarts = {};
-			// The grip sits just left of the checkbox: how far to move it from where it starts.
+			// Like Keep, the grip sits one indent step left of its checkbox, so a sub-item's
+			// grip is right below its parent's checkbox. The grip is as wide as that step.
 			let gripShift = null;
+			let gripWidth = null;
 			const grip = v.contentDOM.querySelector(".fkm-grip");
-			const box = grip?.closest(".cm-line")?.querySelector(".task-list-item-checkbox");
+			const line = grip?.closest(".cm-line");
+			const box = line?.querySelector(".task-list-item-checkbox");
 			if (grip && box) {
+				const indent = v.contentDOM.querySelector(".cm-line.fkm-task .cm-hmd-list-indent .cm-indent");
+				const step = indent?.getBoundingClientRect().width || parseFloat(getComputedStyle(line).fontSize) * STEP_EM;
+				gripWidth = Math.round(step - 4);
 				const current = parseFloat(v.dom.style.getPropertyValue("--fkm-grip-shift")) || 0;
-				const gripRect = grip.getBoundingClientRect();
-				gripShift = Math.round(box.getBoundingClientRect().left - (gripRect.left - current) - gripRect.width - 2);
+				const natural = grip.getBoundingClientRect().left - current;
+				const boxRect = box.getBoundingClientRect();
+				gripShift = Math.round(boxRect.left + boxRect.width / 2 - step - gripWidth / 2 - natural);
 			}
 			for (const block of findBlocks(doc, unit)) {
 				for (const item of block.items) {
@@ -773,7 +785,7 @@ function checklistExtension(plugin) {
 					}
 				}
 			}
-			const found = { gripShift };
+			const found = { gripShift, gripWidth };
 			for (const [depth, hang] of Object.entries(hangs)) {
 				const start = spacerStarts[depth];
 				found[depth] = { hang, spacer: start === undefined ? null : Math.max(0, Math.round(hang - start)) };

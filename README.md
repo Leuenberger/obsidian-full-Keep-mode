@@ -64,7 +64,9 @@ archived state in `keep_archived` and its reminder in `keep_reminder`.
 - **Ticking an item ticks its sub-items** along with it.
 - **Drag and drop.** Every item has a grip next to its checkbox. Drag it up or
   down to move the item, sideways to indent or outdent it, with a mouse or a
-  finger. An item takes its sub-items along.
+  finger. An item takes its sub-items along. Like in Keep, a sub-item's grip is
+  right below its parent's checkbox (a smaller indent, bigger checkboxes, and
+  no indentation lines).
 - **Two levels, like Keep.** An item can be indented once. You can allow three
   levels or unlimited in the settings.
 - **Multi-line items line up.** Extra lines of an item (Shift+Enter) and
