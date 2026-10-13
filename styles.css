@@ -211,8 +211,37 @@ body.fkm-card-drag-active {
 /* ----- Like Keep: a smaller indent and a bigger checkbox in checklists ----- */
 .cm-line.fkm-task,
 .cm-line.fkm-extra {
-	--list-indent: 1.75em; /* = STEP_EM in main.js */
-	--checkbox-size: 18px;
+	--list-indent: 1.5em; /* = STEP_EM in main.js */
+	--checkbox-size: 0.95em;
+	line-height: 1.2;
+}
+
+/* Keep's spacing: room between items, none between the lines of one item. */
+.cm-line.fkm-task {
+	padding-top: 0.45em !important;
+}
+
+/* Phones: Keep's measures (checkbox 14 px, list set in from the edge, so the grips
+   have room on the left). */
+.is-phone .cm-line.fkm-task,
+.is-phone .cm-line.fkm-extra {
+	--checkbox-size: 14px;
+}
+
+/* Keep's margins: title and text 12 px from the edge, checklists set in further. */
+.is-phone .fkm-note-modal {
+	--file-margins: 12px;
+}
+
+.is-phone .fkm-note-modal .cm-line.fkm-task,
+.is-phone .fkm-note-modal .cm-line.fkm-extra {
+	margin-inline-start: 22px !important;
+}
+
+/* Keep's gap between the checkbox and the item's text. */
+.fkm-checkbox .task-list-item-checkbox {
+	margin-inline-end: 0.9em !important;
+	vertical-align: middle;
 }
 
 /* Keep has no indentation lines; here they'd run through the sub-items' grips. */
@@ -230,7 +259,7 @@ body.fkm-card-drag-active {
 	align-items: center;
 	justify-content: center;
 	width: var(--fkm-grip-width, 24px);
-	height: 1.5em;
+	height: 1.2em; /* the item's first line */
 	transform: translateX(var(--fkm-grip-shift, -22px));
 	color: var(--text-faint);
 	cursor: grab;
@@ -577,18 +606,30 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 }
 
 /* ===== The open note: its colour (the same shade as its card) and its Keep title ===== */
-.fkm-color-red { --fkm-note-bg: color-mix(in srgb, var(--color-red) 15%, var(--background-primary)); }
-.fkm-color-orange { --fkm-note-bg: color-mix(in srgb, var(--color-orange) 15%, var(--background-primary)); }
-.fkm-color-yellow { --fkm-note-bg: color-mix(in srgb, var(--color-yellow) 15%, var(--background-primary)); }
-.fkm-color-green { --fkm-note-bg: color-mix(in srgb, var(--color-green) 15%, var(--background-primary)); }
-.fkm-color-cyan { --fkm-note-bg: color-mix(in srgb, var(--color-cyan) 15%, var(--background-primary)); }
-.fkm-color-blue { --fkm-note-bg: color-mix(in srgb, var(--color-blue) 15%, var(--background-primary)); }
-.fkm-color-purple { --fkm-note-bg: color-mix(in srgb, var(--color-purple) 15%, var(--background-primary)); }
-.fkm-color-pink { --fkm-note-bg: color-mix(in srgb, var(--color-pink) 15%, var(--background-primary)); }
-/* Keep's colours that Obsidian's theme has no variable for. */
-.fkm-color-cerulean { --fkm-note-bg: color-mix(in srgb, #2f6f9f 22%, var(--background-primary)); }
-.fkm-color-brown { --fkm-note-bg: color-mix(in srgb, #94683d 20%, var(--background-primary)); }
-.fkm-color-gray { --fkm-note-bg: color-mix(in srgb, var(--text-muted) 16%, var(--background-primary)); }
+/* Google Keep's colours (Coral, Peach, Sand, Mint, Sage, Fog, Storm, Dusk, Blossom,
+   Clay, Chalk), in light and dark mode. */
+.fkm-color-red { --fkm-note-bg: #faafa8; }
+.fkm-color-orange { --fkm-note-bg: #f39f76; }
+.fkm-color-yellow { --fkm-note-bg: #fff8b8; }
+.fkm-color-green { --fkm-note-bg: #e2f6d3; }
+.fkm-color-cyan { --fkm-note-bg: #b4ddd3; }
+.fkm-color-blue { --fkm-note-bg: #d4e4ed; }
+.fkm-color-cerulean { --fkm-note-bg: #aeccdc; }
+.fkm-color-purple { --fkm-note-bg: #d3bfdb; }
+.fkm-color-pink { --fkm-note-bg: #f6e2dd; }
+.fkm-color-brown { --fkm-note-bg: #e9e3d4; }
+.fkm-color-gray { --fkm-note-bg: #efeff1; }
+.theme-dark .fkm-color-red { --fkm-note-bg: #77172e; }
+.theme-dark .fkm-color-orange { --fkm-note-bg: #692b17; }
+.theme-dark .fkm-color-yellow { --fkm-note-bg: #7c4a03; }
+.theme-dark .fkm-color-green { --fkm-note-bg: #264d3b; }
+.theme-dark .fkm-color-cyan { --fkm-note-bg: #0c625d; }
+.theme-dark .fkm-color-blue { --fkm-note-bg: #256377; }
+.theme-dark .fkm-color-cerulean { --fkm-note-bg: #284255; }
+.theme-dark .fkm-color-purple { --fkm-note-bg: #472e5b; }
+.theme-dark .fkm-color-pink { --fkm-note-bg: #6c394f; }
+.theme-dark .fkm-color-brown { --fkm-note-bg: #4b443a; }
+.theme-dark .fkm-color-gray { --fkm-note-bg: #232427; }
 
 /* Everything inside takes the colour as its background. */
 .fkm-note-colored > .workspace-leaf-content,
@@ -932,4 +973,73 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 .fkm-import-status {
 	margin-top: 8px;
 	white-space: pre-wrap;
+}
+
+/* The top bar of a coloured note takes its colour too. */
+.fkm-note-colored .view-header {
+	background-color: var(--fkm-note-bg) !important;
+}
+
+/* ===== Titles like Keep's: regular weight, a bit larger than the text ===== */
+.markdown-source-view .inline-title,
+.markdown-source-view .fkm-title {
+	font-size: 1.4em !important;
+	font-weight: 400 !important;
+	line-height: 1.3;
+}
+
+.fkm-card-title {
+	font-weight: 500 !important;
+	font-size: 1em !important;
+}
+
+/* ===== The pop-up on a computer ===== */
+/* It covers only its board's tab (position set by the plugin), and waits there,
+   hidden, while another tab is in front. */
+.modal-container.fkm-note-container {
+	position: fixed;
+	right: auto;
+	bottom: auto;
+}
+
+.modal-container.fkm-note-container.fkm-hidden {
+	display: none;
+}
+
+/* Shown once complete, not half-drawn. */
+.fkm-note-modal .modal-content.fkm-loading {
+	visibility: hidden;
+}
+
+/* The close button gets room of its own, clear of the top bar's buttons. */
+body:not(.is-phone) .fkm-note-modal .view-header {
+	padding-inline-end: 52px;
+}
+
+/* The pop-up's editor, kept for the next note. */
+.fkm-popup-holder {
+	display: none;
+}
+
+/* ===== Phones ===== */
+/* Keep's bottom bar size. */
+.is-phone .fkm-note-modal .fkm-bottom-bar,
+.is-phone .fkm-new-note-modal .fkm-bottom-bar {
+	min-height: 56px;
+	padding: 4px 12px;
+}
+
+.is-phone .fkm-bottom-button {
+	padding: 10px;
+}
+
+.is-phone .fkm-bottom-button svg {
+	width: 26px;
+	height: 26px;
+}
+
+/* Notices at the bottom, like Keep's, not over the top bar's buttons. */
+body.fkm-keep.is-phone .notice-container {
+	top: auto !important;
+	bottom: calc(var(--safe-area-inset-bottom, 0px) + 80px) !important;
 }

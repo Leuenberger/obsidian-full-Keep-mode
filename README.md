@@ -7,6 +7,11 @@ The board of coloured cards, pinned notes, labels, the archive, reminders,
 "Take a note…", and Keep's checklists, where ticked items drop to the bottom and
 sub-items follow their parent. If you know Keep, you already know how to use it.
 
+**New to Obsidian and only ever used Keep?** This plugin is made for you. Install
+it, import your Keep notes, and you're on a board that looks and works like the
+one you're used to. No Markdown, folders or settings to learn first; the rest of
+Obsidian is there whenever you want it.
+
 ![The Keep board: hovering a card, pinning, searching, ticking items on a card and in an open note, and dragging a card](docs/board.gif)
 
 ## Why Full Keep Mode
@@ -33,7 +38,7 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
 | In Google Keep | In Full Keep Mode |
 |---|---|
 | Board of cards, "Pinned" and "Others" | ✓ Keep's cards in columns (two on phones), pinned first |
-| Note colours | ✓ cards and open notes take the colour |
+| Note colours | ✓ Keep's exact colours, light and dark; cards and open notes (top bar included) take the colour |
 | Pin | ✓ on the card (hover) and in the note |
 | Labels and the side menu (☰) | ✓ Notes, Reminders, your labels and Archive; label picker on every note |
 | Search bar | ✓ always on top; finds titles, labels and text |
@@ -68,6 +73,8 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
   levels or unlimited in the settings.
 - **Multi-line items line up.** Extra lines of an item (Shift+Enter) and
   wrapped lines start exactly under the item's text.
+- **Pasting works like Keep.** Paste several lines into an item and they line
+  up as its lines; pasted items stay items, whatever indentation they had.
 - **Checkboxes stay checkboxes.** The cursor never lands inside `- [ ]`, and
   a selection doesn't turn checkboxes back into brackets. Backspace at the
   start of an item joins it to the item above, Delete at the end of an item
@@ -92,8 +99,9 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
 - **Hover a card** (on a computer) for the pin and Keep's buttons: reminder,
   colour, archive and more. Right-click a card, or hold it on a phone, for its
   menu.
-- **Click a card** to open the note over the board, in its colour. On phones it
-  takes the whole screen, with Keep's top bar (back, pin, reminder, archive) and
+- **Click a card** to open the note over the board, in its colour. On a
+  computer it covers just the board's tab: switch to another tab and back, and
+  the note is still open there. On phones it takes the whole screen, with Keep's top bar (back, pin, reminder, archive) and
   bottom bar ("+", colour, undo/redo, "⋮"), both staying put while you scroll.
 - **The board is your home screen**, like Keep's: it opens when Obsidian starts,
   and on a phone an empty tab shows it too.
@@ -116,7 +124,7 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
   Editing the title renames the note too.
 - **Archive** with "Undo" in the confirmation.
 - **Reminders** pop up as a notice in Obsidian, plus a system notification on a
-  computer. Reminders that fell due while Obsidian was closed are shown when you
+  computer; "Open" shows the note over the board. Reminders that fell due while Obsidian was closed are shown when you
   open it.
 - **Show / hide checkboxes** (⋮ menu) turns a note's lines into a checklist and
   back.

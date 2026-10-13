@@ -69,17 +69,17 @@ const DEVICE_SETTINGS = [];
 const LABELS_VIEW = "full-keep-mode-labels";
 const COLORS = [
 	{ id: null, name: "Default" },
-	{ id: "red", name: "Red", hex: "#f28b82" },
-	{ id: "orange", name: "Orange", hex: "#fbbc04" },
-	{ id: "yellow", name: "Yellow", hex: "#fff475" },
-	{ id: "green", name: "Green", hex: "#ccff90" },
-	{ id: "cyan", name: "Teal", hex: "#a8f0e0" },
-	{ id: "blue", name: "Blue", hex: "#aecbfa" },
-	{ id: "cerulean", name: "Dark blue", hex: "#aeccdc" },
-	{ id: "purple", name: "Purple", hex: "#d7aefb" },
-	{ id: "pink", name: "Pink", hex: "#fdcfe8" },
-	{ id: "brown", name: "Brown", hex: "#e6c9a8" },
-	{ id: "gray", name: "Grey", hex: "#e8eaed" },
+	{ id: "red", name: "Coral", hex: "#faafa8" },
+	{ id: "orange", name: "Peach", hex: "#f39f76" },
+	{ id: "yellow", name: "Sand", hex: "#fff8b8" },
+	{ id: "green", name: "Mint", hex: "#e2f6d3" },
+	{ id: "cyan", name: "Sage", hex: "#b4ddd3" },
+	{ id: "blue", name: "Fog", hex: "#d4e4ed" },
+	{ id: "cerulean", name: "Storm", hex: "#aeccdc" },
+	{ id: "purple", name: "Dusk", hex: "#d3bfdb" },
+	{ id: "pink", name: "Blossom", hex: "#f6e2dd" },
+	{ id: "brown", name: "Clay", hex: "#e9e3d4" },
+	{ id: "gray", name: "Chalk", hex: "#efeff1" },
 ];
 // Keep's colour names (in exports) -> ours.
 const KEEP_COLORS = {
@@ -123,7 +123,7 @@ views:
         direction: DESC
 `;
 const INDENT_STEP = 28; // px of sideways drag per indent level
-const STEP_EM = 1.75; // indent of checklist items (styles.css --fkm-step), like Keep's
+const STEP_EM = 1.5; // indent of checklist items (styles.css --list-indent), like Keep's
 const MAX_STYLED_DEPTH = 5; // indent levels with alignment styles (deeper ones use level 5's)
 
 // ----- reading checklists -----------------------------------------------------------------
@@ -816,7 +816,7 @@ function checklistExtension(plugin) {
 					if (hangs[depth] === undefined && !touched(head) && item.text.trim()) {
 						const headEl = lineElAt(head.from);
 						const x = headEl && letterX(head.from + textOffset(head.text), headEl);
-						if (typeof x === "number") hangs[depth] = Math.round(x);
+						if (typeof x === "number") hangs[depth] = Math.round(x * 100) / 100; // sub-pixel: the em-based measures give fractions
 					}
 					if (spacerStarts[depth] === undefined) {
 						for (let k = 1; k <= item.extra.length; k++) {
@@ -832,7 +832,7 @@ function checklistExtension(plugin) {
 			const found = { gripShift, gripWidth };
 			for (const [depth, hang] of Object.entries(hangs)) {
 				const start = spacerStarts[depth];
-				found[depth] = { hang, spacer: start === undefined ? null : Math.max(0, Math.round(hang - start)) };
+				found[depth] = { hang, spacer: start === undefined ? null : Math.max(0, Math.round((hang - start) * 100) / 100) };
 			}
 			return found;
 		}
@@ -878,7 +878,48 @@ function checklistExtension(plugin) {
 		}
 	});
 
-	return [decorations, keepCursorOut, keepKeys, onTick, hangMeasure, tabKey, headerButtons];
+	// Pasting several lines into a checklist item: each line becomes part of the
+	// checklist the way Keep has it - plain lines are lines of the item (lined up with
+	// its text), pasted items stay items (at this level, keeping their own levels below
+	// it) - instead of keeping whatever indentation they had where they came from.
+	const keepPaste = EditorView.domEventHandlers({
+		paste(event, view) {
+			if (!livePreview(view.state) || !enabledFor(view.state)) return false;
+			const text = event.clipboardData?.getData("text/plain");
+			if (!text || !/[\r\n]/.test(text.replace(/[\r\n]+$/, ""))) return false;
+			const { state } = view;
+			const unit = indentUnit(app);
+			const sel = state.selection.main;
+			const line = state.doc.lineAt(sel.from);
+			const block = findBlock(state.doc, line.number, unit);
+			const item = block ? [...block.items].reverse().find(i => i.line <= line.number) : null;
+			if (!item) return false; // not in a checklist: Obsidian's usual paste
+			const pad = depth => (unit.useTab ? "\t".repeat(depth) : " ".repeat(unit.tabSize * depth));
+			const cap = plugin.depthCap(baseDepth(block.items));
+			const lines = text.replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n");
+			const tasks = lines.map(l => parseTask(l, unit));
+			const taskDepths = tasks.filter(Boolean).map(t => t.depth);
+			const top = taskDepths.length ? Math.min(...taskDepths) : 0;
+			const before = line.number === item.line ? state.doc.sliceString(line.from, sel.from).replace(TASK_RE.test(line.text) ? /^[ \t]*[-*+] \[.\] ?/ : /^/, "") : "x";
+			let depth = item.depth; // the level of the item the next plain lines belong to
+			const out = lines.map((l, i) => {
+				const task = tasks[i];
+				if (task) {
+					const level = Math.min(item.depth + Math.max(0, task.depth - top), cap);
+					if (i === 0 && !before.trim()) return task.text; // into the (empty) item at the cursor
+					depth = level;
+					return `${i === 0 ? "\n" : ""}${pad(level)}${task.bullet} [${task.mark}] ${task.text}`;
+				}
+				if (i === 0) return l.trim();
+				return pad(depth + 1) + l.trim();
+			});
+			event.preventDefault();
+			view.dispatch(state.replaceSelection(out.join("\n")), { userEvent: "input.paste", scrollIntoView: true });
+			return true;
+		},
+	});
+
+	return [decorations, keepCursorOut, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons];
 }
 
 // ----- settings tab -------------------------------------------------------------------------
@@ -1113,7 +1154,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.app.workspace.iterateAllLeaves(leaf => {
 			if (leaf.view?.fullKeepModeButtons === this) delete leaf.view.fullKeepModeButtons;
 		});
-		document.body.removeClass("fkm-hide-properties");
+		document.body.removeClass("fkm-hide-properties", "fkm-keep");
+		this.popupLeaf?.detach();
+		this.popupHolder?.remove();
 		document.querySelectorAll(".fkm-note-footer, .fkm-bottom-bar, .fkm-title").forEach(el => el.remove());
 		document.querySelectorAll(".fkm-has-title").forEach(el => el.removeClass("fkm-has-title"));
 		document.querySelectorAll(".fkm-note-colored").forEach(el => {
@@ -1480,6 +1523,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 	applyBodyClasses() {
 		document.body.toggleClass("fkm-hide-properties", this.settings.hideProperties);
+		document.body.addClass("fkm-keep"); // e.g. notices at the bottom on phones, like Keep's
 	}
 
 	// ----- archive --------------------------------------------------------------------------
@@ -1597,7 +1641,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			const open = f.createEl("a", { text: "Open", href: "#" });
 			open.addEventListener("click", event => {
 				event.preventDefault();
-				void this.app.workspace.getLeaf(false).openFile(file);
+				void this.openNoteOnBoard(file);
 			});
 		});
 		new obsidian.Notice(fragment, 0); // stays until clicked away, like a Keep reminder
@@ -1635,7 +1679,6 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			if (pinned) delete fm[PIN_PROPERTY];
 			else fm[PIN_PROPERTY] = true;
 		});
-		new obsidian.Notice(pinned ? "Unpinned" : "Pinned");
 	}
 
 	showColorMenu(view, event) {
@@ -2538,7 +2581,67 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const file = typeof this.app.fileManager.createNewMarkdownFile === "function"
 			? await this.app.fileManager.createNewMarkdownFile(parent, undefined, content)
 			: await this.app.vault.create(obsidian.normalizePath(`${parent.path}/Untitled ${Date.now()}.md`), content);
-		new NoteModal(this, file, { isNew: true, initial: content }).open();
+		new NoteModal(this, file, { isNew: true, initial: content, boardLeaf: this.activeBoardLeaf() }).open();
+	}
+
+	// A note over its board (e.g. from a reminder), so the board is right behind it.
+	async openNoteOnBoard(file) {
+		const leaf = await this.openBoard();
+		if (leaf) new NoteModal(this, file, { boardLeaf: leaf }).open();
+		else await this.app.workspace.getLeaf(false).openFile(file);
+	}
+
+	// The board tab in front, if the front tab shows a board.
+	activeBoardLeaf() {
+		const leaf = this.app.workspace.getMostRecentLeaf();
+		return leaf?.view?.containerEl?.querySelector(".fkm-board") ? leaf : null;
+	}
+
+	// The editor of the pop-up: kept and reused, so a note opens faster than with a new
+	// editor each time. A second pop-up open at the same time (another board tab) gets
+	// its own.
+	takePopupLeaf() {
+		if (this.popupLeaf && !this.popupLeafBusy) {
+			this.popupLeafBusy = true;
+			return this.popupLeaf;
+		}
+		const WorkspaceLeaf = this.app.workspace.getLeaf(false).constructor;
+		const leaf = new WorkspaceLeaf(this.app);
+		if (!this.popupLeaf) {
+			this.popupLeaf = leaf;
+			this.popupLeafBusy = true;
+		}
+		return leaf;
+	}
+
+	// Build the pop-up's editor in the background once a board is shown, so even the
+	// first note opens quickly.
+	warmUpPopup(file) {
+		if (this.popupLeaf || this.warmingUp || !(file instanceof obsidian.TFile)) return;
+		this.warmingUp = true;
+		window.setTimeout(async () => {
+			if (!this._loaded || this.popupLeaf) return;
+			const leaf = this.takePopupLeaf();
+			this.returnPopupLeaf(leaf); // parked, hidden
+			try {
+				await leaf.openFile(file, { state: { mode: "source" } });
+			} catch {
+				// not important
+			}
+		}, 1500);
+	}
+
+	returnPopupLeaf(leaf) {
+		if (leaf !== this.popupLeaf) {
+			leaf.detach();
+			return;
+		}
+		if (!this.popupHolder) {
+			this.popupHolder = document.body.createDiv({ cls: "fkm-popup-holder" });
+		}
+		if (leaf.containerEl.contains(document.activeElement)) document.activeElement.blur();
+		this.popupHolder.appendChild(leaf.containerEl);
+		this.popupLeafBusy = false;
 	}
 
 	async createBoard() {
@@ -2549,36 +2652,87 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	}
 };
 
-// A note in a pop-up over the board, like Keep's: a full editor (a leaf of its own).
-// A new note opens with its title selected; closed untouched, it is thrown away.
+// A note in a pop-up over the board, like Keep's: a full editor. On a computer it covers
+// only its board's tab, so other tabs stay usable and it waits there while another tab
+// is in front; on a phone it takes the whole screen. A new note opens with its title
+// selected; closed untouched, it is thrown away.
 class NoteModal extends obsidian.Modal {
-	constructor(plugin, file, { isNew = false, initial = "" } = {}) {
+	constructor(plugin, file, { isNew = false, initial = "", boardLeaf = null } = {}) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.file = file;
 		this.isNew = isNew;
 		this.initial = initial;
 		this.createdName = file.basename;
+		this.boardLeaf = boardLeaf;
 		this.leaf = null;
 	}
 
 	async onOpen() {
 		this.modalEl.addClass("fkm-note-modal");
 		if (this.isNew) this.modalEl.addClass("fkm-new-note-modal");
-		this.contentEl.empty();
+		const content = this.contentEl;
+		content.empty();
+		content.addClass("fkm-loading"); // shown once complete, not half-drawn
+		if (obsidian.Platform.isPhone) this.backArrow();
+		else if (this.boardLeaf) this.fitToBoard();
 		try {
-			const WorkspaceLeaf = this.app.workspace.getLeaf(false).constructor;
-			this.leaf = new WorkspaceLeaf(this.app);
-			this.contentEl.appendChild(this.leaf.containerEl);
+			this.leaf = this.plugin.takePopupLeaf();
+			content.appendChild(this.leaf.containerEl);
 			await this.leaf.openFile(this.file, { state: { mode: "source" }, eState: this.isNew ? { rename: "all" } : {} });
+			this.plugin.renderButtons(this.file); // title, colour, labels: right away
 		} catch (err) {
 			console.error("[Full Keep Mode] Couldn't open the note:", err);
-			this.contentEl.createEl("p", { text: "Couldn't open the editor." });
+			content.createEl("p", { text: "Couldn't open the editor." });
+		}
+		content.removeClass("fkm-loading");
+	}
+
+	// Phones: Keep's back arrow (top left) instead of the close button.
+	backArrow() {
+		const close = this.modalEl.querySelector(":scope > .modal-close-button, :scope > .modal-header-button");
+		if (close && !close.hasClass("fkm-back-button")) {
+			close.addClass("fkm-back-button");
+			close.empty();
+			obsidian.setIcon(close, "arrow-left");
 		}
 	}
 
+	// Computers: cover just the board's tab, and wait there while another tab is in front.
+	fitToBoard() {
+		const board = this.boardLeaf;
+		const container = this.containerEl;
+		container.addClass("fkm-note-container");
+		const fit = () => {
+			const r = board.containerEl.getBoundingClientRect();
+			if (!r.width) return; // its tab is in the background
+			Object.assign(container.style, { top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px` });
+		};
+		fit();
+		this.resizeObserver = new ResizeObserver(fit);
+		this.resizeObserver.observe(board.containerEl);
+		this.scopeActive = true;
+		this.leafRef = this.app.workspace.on("active-leaf-change", leaf => {
+			if (!leaf || leaf === this.leaf) return;
+			const show = leaf === board;
+			container.toggleClass("fkm-hidden", !show);
+			if (show) fit();
+			// Escape and the pop-up's keys only while it's in front.
+			if (show && !this.scopeActive) this.app.keymap.pushScope(this.scope);
+			if (!show && this.scopeActive) this.app.keymap.popScope(this.scope);
+			this.scopeActive = show;
+		});
+		// Its board's tab closed (or shows something else now): the pop-up goes with it.
+		this.layoutRef = this.app.workspace.on("layout-change", () => {
+			if (!board.containerEl.isConnected || !board.view?.containerEl?.querySelector(".fkm-board")) this.close();
+		});
+	}
+
 	async onClose() {
-		this.leaf?.detach();
+		this.resizeObserver?.disconnect();
+		if (this.leafRef) this.app.workspace.offref(this.leafRef);
+		if (this.layoutRef) this.app.workspace.offref(this.layoutRef);
+		if (this.leaf) this.plugin.returnPopupLeaf(this.leaf);
 		this.leaf = null;
 		this.contentEl.empty();
 		if (!this.isNew) return;
@@ -2653,7 +2807,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 			const card = event.target.closest?.(".fkm-card[data-path]");
 			if (!card || event.target.closest(".fkm-card-actions, .fkm-card-pin, .fkm-card-check, a")) return;
 			const file = this.plugin.app.vault.getAbstractFileByPath(card.dataset.path);
-			if (file instanceof obsidian.TFile) new NoteModal(plugin, file).open();
+			if (file instanceof obsidian.TFile) new NoteModal(plugin, file, { boardLeaf: this.leafOf() }).open();
 		});
 		containerEl.addEventListener("contextmenu", event => {
 			const card = event.target.closest?.(".fkm-card[data-path]");
@@ -2691,6 +2845,11 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		return /archiv/i.test(this.boardController?.viewName ?? "");
 	}
 
+	// The tab this board is in.
+	leafOf() {
+		return this.plugin.app.workspace.getLeavesOfType("bases").find(leaf => leaf.view.containerEl.contains(this.boardEl)) ?? null;
+	}
+
 	async preview(file) {
 		const known = this.previews.get(file.path);
 		if (known && known.mtime === file.stat.mtime) return known.preview;
@@ -2722,6 +2881,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		this.cards = cards;
 		this.empty = !files.length;
 		this.layout();
+		if (files.length) plugin.warmUpPopup(files[0]);
 	}
 
 	// Keep's masonry: fixed-width columns, each card going to the shortest one.

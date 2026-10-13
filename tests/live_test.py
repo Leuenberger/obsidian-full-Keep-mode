@@ -501,6 +501,23 @@ def main():
         check("links to other Keep notes become Obsidian links", "See [[Packing]] please" in imported["links"], imported["links"])
         check("an untitled Keep note shows no title", imported["milkTitle"] == "" and "Buy milk" in imported["milk"], imported)
 
+        # Pasting several lines into an item: plain lines become lines of the item, pasted
+        # items stay items, whatever indentation they had before.
+        def paste_into(name, note, line_no, text):
+            open_note(name, note)
+            ob.js(PRELUDE + f"""const cm = window.__tcLeaf.view.editor.cm; const l = cm.state.doc.line({line_no});
+                cm.focus(); cm.dispatch({{ selection: {{ anchor: l.to }} }}); await wait(150);
+                const dt = new DataTransfer(); dt.setData('text/plain', {json.dumps(text)});
+                cm.contentDOM.dispatchEvent(new ClipboardEvent('paste', {{ clipboardData: dt, bubbles: true, cancelable: true }})); await wait(500);""")
+            return text_now()
+        def text_now():
+            return text()
+        pasted = paste_into("paste one", "- [ ] A\n- [ ] B\n", 1, "line1\n\t\tline2\n- [ ] C\n\t- [ ] D\n  more")
+        check("pasting lines into an item keeps them in the checklist, lined up",
+              pasted == "- [ ] Aline1\n\tline2\n- [ ] C\n\t- [ ] D\n\t\tmore\n- [ ] B\n", repr(pasted))
+        pasted = paste_into("paste two", "- [ ] A\n- [ ] \n- [ ] B\n", 2, "\t- [ ] X\n\t\tsecond\n\t\tthird")
+        check("…and a copied item with its lines lands at this level", pasted == "- [ ] A\n- [ ] X\n\tsecond\n\tthird\n- [ ] B\n", repr(pasted))
+
         print("Settings and opt-out")
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})
         click_checkbox("A")
@@ -549,7 +566,7 @@ def main():
             ob.js(PRELUDE + "document.querySelector('.fkm-note-modal .fkm-pin-button').click(); await wait(800);")
             check("the Pin button pins the note", frontmatter("Card B").get("keep_pinned") is True, frontmatter("Card B"))
             ob.js(PRELUDE + """document.querySelector('.fkm-note-modal .fkm-color-button').click(); await wait(400);
-                const item = [...document.querySelectorAll('.menu .menu-item')].find(i => i.textContent.trim() === 'Blue');
+                const item = [...document.querySelectorAll('.menu .menu-item')].find(i => i.textContent.trim() === 'Fog');
                 item.click(); await wait(800);""")
             check("the Colour button sets the colour", frontmatter("Card B").get("keep_color") == "blue", frontmatter("Card B"))
             colored = ob.js(PRELUDE + "await wait(500); return [...document.querySelectorAll('.fkm-note-modal')].pop()?.classList.contains('fkm-color-blue');")
@@ -569,6 +586,48 @@ def main():
             ticked = ob.js(PRELUDE + "return await app.vault.read(app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'));")
             check("ticking on a card ticks the item and moves it down, like in the note", ticked.endswith("- [ ] Bread\n- [x] Milk\n- [x] Eggs\n"), repr(ticked))
             check("…and doesn't open the note", modal_open() == 0)
+
+            # Keep's exact colours, and the open note's top bar takes the colour too.
+            colours = ob.js(PRELUDE + """const card = [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md'));
+                document.body.classList.contains('theme-light');
+                return { card: getComputedStyle(card).backgroundColor, cls: card.className, light: document.body.classList.contains('theme-light') };""")
+            check("cards have Keep's colours (Fog for blue)", not colours["light"] or colours["card"] == "rgb(212, 228, 237)", colours)
+
+            # A pop-up stays with its board's tab while another tab is in front.
+            ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card A.md');
+                window.__otherTab = app.workspace.getLeaf('tab'); await window.__otherTab.openFile(app.vault.getAbstractFileByPath(FOLDER + '/Card C.md'));
+                app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(600);
+                [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md')).querySelector('.fkm-card-title').click();
+                await wait(1200);""")
+            header = ob.js("""const m = [...document.querySelectorAll('.fkm-note-modal')].pop(); const h = m?.querySelector('.view-header'); return h ? getComputedStyle(h).backgroundColor : null;""")
+            check("the open note's top bar has the note's colour", header == "rgb(212, 228, 237)" or not colours["light"], header)
+            def tab_click(js):
+                r = ob.js(js)
+                ob.mouse("mouseMoved", r["x"], r["y"], 0); ob.mouse("mousePressed", r["x"], r["y"]); ob.mouse("mouseReleased", r["x"], r["y"], 0)
+                time.sleep(1)
+            def popup_state():
+                return ob.js("""const m = [...document.querySelectorAll('.fkm-note-modal')].pop(); return m ? (m.closest('.modal-container').classList.contains('fkm-hidden') ? 'hidden' : 'shown') : 'closed';""")
+            tab_click("const r = window.__otherTab.tabHeaderEl.getBoundingClientRect(); return { x: r.left + 30, y: r.top + r.height / 2 };")
+            away = popup_state()
+            tab_click("const r = window.__fkmBoard.tabHeaderEl.getBoundingClientRect(); return { x: r.left + 30, y: r.top + r.height / 2 };")
+            back = popup_state()
+            check("another tab can be opened while a note is popped up; back on the board it's still there", (away, back) == ("hidden", "shown"), (away, back))
+            press_escape()
+            ob.js("window.__otherTab.detach();")
+            # A reminder's "Open" shows the note over its board.
+            opened = ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
+                const note = app.workspace.getLeaf('tab'); await note.openFile(app.vault.getAbstractFileByPath(FOLDER + '/Card C.md'));
+                app.workspace.setActiveLeaf(note, { focus: true }); await wait(400);
+                const f = app.vault.getAbstractFileByPath(FOLDER + '/Card A.md');
+                p.showReminder(f, moment(), false); await wait(200);
+                [...document.querySelectorAll('.notice a')].filter(a => a.textContent === 'Open').pop().click(); await wait(1800);
+                const active = app.workspace.getMostRecentLeaf()?.view?.getViewType();
+                document.querySelectorAll('.notice').forEach(n => { if (n.textContent.includes('Card A')) n.remove(); });
+                note.detach();
+                return { active, popup: !!document.querySelector('.fkm-note-modal') };""")
+            check("a reminder's \"Open\" shows the note popped up over the board", opened == {"active": "bases", "popup": True}, opened)
+            press_escape()
+            ob.js(PRELUDE + "app.workspace.revealLeaf(window.__fkmBoard); app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(800);")
 
             # "Take a note…": an untouched new note is thrown away, one with text stays.
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note').click(); await wait(1500);")
@@ -602,7 +661,7 @@ def main():
                 if card_order() == ["Card C"]:
                     break
                 time.sleep(0.5)
-            check("searching finds notes by their text", card_order() == ["Card C"], card_order())
+            check("searching finds notes by their text", card_order() == ["Card C"], (card_order(), ob.js("""const p = app.plugins.plugins['full-keep-mode']; return { text: p.boardFilter.text, n: p.boardFilter.matches?.size, input: window.__fkmBoard.view.containerEl.querySelector('.fkm-search input')?.value, inputs: document.querySelectorAll('.fkm-search input').length, boards: p.boards.size ?? p.boards.length, modals: document.querySelectorAll('.fkm-note-modal').length, leaves: app.workspace.getLeavesOfType('bases').map(l => l.view.file?.path) };""")))
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-search-clear').click(); await wait(1500);")
             check("…and clearing the search shows all again", len(card_order()) == 3, card_order())
             ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
