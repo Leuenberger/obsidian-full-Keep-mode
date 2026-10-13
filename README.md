@@ -95,6 +95,8 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
 - **Click a card** to open the note over the board, in its colour. On phones it
   takes the whole screen, with Keep's top bar (back, pin, reminder, archive) and
   bottom bar ("+", colour, undo/redo, "⋮"), both staying put while you scroll.
+- **The board is your home screen**, like Keep's: it opens when Obsidian starts,
+  and on a phone an empty tab shows it too.
 - **The search bar** stays at the top while you scroll. Its ☰ button opens the
   side menu: Notes, Reminders, your labels, Archive.
 - **"Take a note…"** opens a new note with the title ready to type; the
@@ -191,6 +193,7 @@ archived).
 | Colour button | on |
 | Archive button | on |
 | Reminders | on |
+| Board as home screen | on |
 | Search bar | on |
 | Labels side menu | on |
 | "Take a note…" bar | on |

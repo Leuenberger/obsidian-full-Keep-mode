@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS = {
 	shortcutReminders: false, // also hand each reminder to an Apple Shortcut (e.g. into the Reminders app)
 	shortcutName: "Keep reminder",
 	takeANote: true,
+	boardAsHome: true, // open the board at start (and, on phones, in empty tabs), like Keep
 	searchBar: true, // always-visible search bar on the board
 	labelsSidebar: true, // Keep's side menu: Notes, Reminders, labels, Archive
 	dragCards: true,
@@ -921,6 +922,7 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 				this.plugin.settings.shortcutName = value.trim() || "Keep reminder";
 				await this.plugin.saveSettings();
 			}));
+		toggle("Board as home screen", "Open the board when Obsidian starts, like Keep. On phones, an empty tab shows the board too.", "boardAsHome");
 		toggle("Search bar", "Always shown at the top of the board, like Keep's. Finds notes by title, label and text.", "searchBar");
 		toggle("Labels side menu", "Notes, Reminders, your labels and Archive in the left sidebar, like Keep's menu. Click one to show it on the board.", "labelsSidebar");
 		toggle("\"Take a note…\" bar", "On the board: opens a new note in the pop-up. A new note closed without any text is thrown away, like in Keep.", "takeANote");
@@ -1048,6 +1050,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		}));
 		this.app.workspace.onLayoutReady(() => {
 			if (this.settings.labelsSidebar) void this.openLabelsView(false);
+			// The board as the home screen, like Keep: at start, and on phones instead of
+			// an empty "New tab" (e.g. after closing the board by accident).
+			if (this.settings.boardAsHome) void this.showBoardHome(true);
+			this.registerEvent(this.app.workspace.on("active-leaf-change", leaf => {
+				if (this.settings.boardAsHome && obsidian.Platform.isPhone && leaf?.view?.getViewType?.() === "empty") {
+					void this.showBoardHome(false, leaf);
+				}
+			}));
 		});
 		const relabel = obsidian.debounce(() => this.labelsView()?.render(), 1000, true);
 		this.registerEvent(this.app.metadataCache.on("changed", () => relabel()));
@@ -1901,13 +1911,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			|| new RegExp(`type: ${BOARD_VIEW}`).test(leaf.view?.data ?? ""));
 		let leaf = open.find(l => l === this.app.workspace.getMostRecentLeaf()) ?? open[0];
 		if (!leaf) {
-			let file = null;
-			for (const f of this.app.vault.getFiles().filter(f => f.extension === "base")) {
-				if (new RegExp(`type: ${BOARD_VIEW}`).test(await this.app.vault.cachedRead(f))) {
-					file = f;
-					break;
-				}
-			}
+			const file = await this.findBoardFile();
 			if (!file) {
 				new obsidian.Notice("No Keep board yet: run the command \"Create a Keep board\" first.");
 				return null;
@@ -1919,6 +1923,42 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.app.workspace.revealLeaf(leaf);
 		for (let i = 0; i < 30 && !this.boardOf(leaf); i++) await sleep(100);
 		return leaf;
+	}
+
+	// The .base file with a Keep board, preferring one named like "Board".
+	async findBoardFile() {
+		const bases = this.app.vault.getFiles().filter(f => f.extension === "base")
+			.sort((a, b) => Number(/board/i.test(b.basename)) - Number(/board/i.test(a.basename)) || a.path.localeCompare(b.path));
+		for (const f of bases) {
+			if (new RegExp(`type: ${BOARD_VIEW}`).test(await this.app.vault.cachedRead(f))) return f;
+		}
+		return null;
+	}
+
+	// Show the board: an open one, or else the first .base file with a board (at start in
+	// its own tab unless the current tab is empty; `into`: that empty tab).
+	async showBoardHome(atStart, into = null) {
+		const open = this.app.workspace.getLeavesOfType("bases").find(leaf => this.boardOf(leaf)
+			|| new RegExp(`type: ${BOARD_VIEW}`).test(leaf.view?.data ?? ""));
+		if (open && !into) {
+			this.app.workspace.setActiveLeaf(open, { focus: false });
+			this.app.workspace.revealLeaf(open);
+			return;
+		}
+		const file = await this.findBoardFile();
+		if (!file) return;
+		if (open && into) {
+			// A board is already open in another tab: show that one instead of the empty tab.
+			into.detach();
+			this.app.workspace.setActiveLeaf(open, { focus: false });
+			this.app.workspace.revealLeaf(open);
+			return;
+		}
+		const active = into ?? this.app.workspace.getMostRecentLeaf();
+		const empty = active?.view?.getViewType?.() === "empty";
+		const leaf = empty ? active : this.app.workspace.getLeaf("tab");
+		await leaf.openFile(file);
+		if (atStart) this.app.workspace.setActiveLeaf(leaf, { focus: false });
 	}
 
 	// From the side menu or a label on a note: "notes", "reminders", "archive" or "label:<name>".
