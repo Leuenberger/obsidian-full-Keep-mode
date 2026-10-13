@@ -40,7 +40,7 @@ Obsidian is there whenever you want it.
 | Board of cards, "Pinned" and "Others" | ✓ Keep's cards in columns (two on phones), pinned first |
 | Note colours | ✓ Keep's exact colours, light and dark; cards and open notes (top bar included) take the colour |
 | Pin | ✓ on the card (hover) and in the note |
-| Labels and the side menu (☰) | ✓ Notes, Reminders, your labels and Archive; label picker on every note |
+| Labels and the side menu (☰) | ✓ Notes, Reminders, your labels and Archive; label picker on every note; "Edit labels" |
 | Search bar | ✓ always on top; finds titles, labels and text |
 | "Take a note…" and "New list" | ✓ a note taken under a label gets that label |
 | Archive, with Undo | ✓ archive view in the side menu |
@@ -119,7 +119,8 @@ Obsidian is there whenever you want it.
 - **No clutter.** Properties are hidden; the note's labels and "Edited …"
   appear below the text, outside it, so Ctrl/Cmd+A selects just the text.
 - **Labels**: the "+ Label" button below a note (or "Labels" in its ⋮ menu)
-  opens Keep's "Label note": tick labels or type a new one.
+  opens Keep's "Label note": tick labels or type a new one. "Edit labels" in the
+  side menu renames or deletes a label in all its notes (the notes stay).
 - **Keep titles** with characters a file name can't have ("Sept/Oct 2026").
   Editing the title renames the note too.
 - **Archive** with "Undo" in the confirmation.

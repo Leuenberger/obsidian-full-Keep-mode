@@ -678,6 +678,45 @@ def main():
             press_escape()
             ob.js(PRELUDE + "await app.plugins.plugins['full-keep-mode'].showOnBoard('notes'); await wait(1200);")
             check("\"Notes\" shows all notes again", len(card_order()) == 3, card_order())
+
+            # Keep's "Edit labels" (side menu): rename a label in all its notes, or delete it.
+            # Names no real note has: renaming changes every note in the vault with the label.
+            ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
+                for (const [name, label] of [['Card A', 'fkm-test-fruit'], ['Card B', 'fkm-test-fruit'], ['Card C', 'fkm-test-veg']])
+                    await p.setLabel(app.vault.getAbstractFileByPath(FOLDER + '/' + name + '.md'), label, true);
+                await wait(1200);
+                app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true });
+                await p.showOnBoard('label:fkm-test-fruit'); await wait(800);
+                await p.openLabelsView(true); await wait(800);
+                document.querySelector('.fkm-labels-edit').click(); await wait(600);""")
+            def label_row_js(name, action):
+                return PRELUDE + f"""const row = [...document.querySelectorAll('.fkm-edit-labels-row')].find(r => r.dataset.label === {json.dumps(name)});
+                    const input = row.querySelector('input'); {action}"""
+            def rename_label(name, to):
+                return ob.js(label_row_js(name, f"""input.focus(); input.value = {json.dumps(to)};
+                    input.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', bubbles: true, cancelable: true }})); await wait(1800);
+                    return [...document.querySelectorAll('.fkm-edit-labels-error')].map(e => e.textContent).filter(Boolean);"""))
+            errors = rename_label("fkm-test-fruit", "fkm-test-veg")
+            check("Edit labels: renaming to a label that exists says so", errors == ["Label already exists"], errors)
+            rename_label("fkm-test-fruit", "fkm test fruits")
+            tags = [frontmatter(n).get("tags") for n in ("Card A", "Card B", "Card C")]
+            check("Edit labels: renaming changes the label in all its notes", tags == [["fkm-test-fruits"], ["fkm-test-fruits"], ["fkm-test-veg"]], tags)
+            time.sleep(0.5)
+            chip = ob.js("return window.__fkmBoard.view.containerEl.querySelector('.fkm-search-chip')?.innerText ?? null;")
+            check("…and the board showing it follows the new name", chip == "fkm-test-fruits" and sorted(card_order()) == ["Card A", "Card B"], (chip, card_order()))
+            ob.js(label_row_js("fkm-test-fruits", """row.querySelector('.fkm-edit-labels-delete').click(); await wait(400);
+                const text = document.querySelector('.fkm-confirm-modal p').textContent; window.__confirmText = text;
+                [...document.querySelectorAll('.fkm-confirm-modal button')].find(b => b.textContent === 'Delete').click(); await wait(1800);"""))
+            confirm_text = ob.js("return window.__confirmText;")
+            check("Edit labels: deleting asks first, saying the notes stay", "2 notes" in confirm_text and "won't be deleted" in confirm_text, confirm_text)
+            tags = [frontmatter(n).get("tags") for n in ("Card A", "Card B", "Card C")]
+            exist = ob.js(PRELUDE + "return ['Card A', 'Card B', 'Card C'].every(n => app.vault.getAbstractFileByPath(FOLDER + '/' + n + '.md'));")
+            check("…then removes the label from its notes, which stay", tags == [None, None, ["fkm-test-veg"]] and exist, (tags, exist))
+            rows = ob.js("return [...document.querySelectorAll('.fkm-edit-labels-row input')].map(i => i.value).filter(v => v.startsWith('fkm-test'));")
+            check("…and from the list", rows == ["fkm-test-veg"], rows)
+            ob.js(PRELUDE + "[...document.querySelectorAll('.fkm-edit-labels-modal button')].find(b => b.textContent === 'Done').click(); await wait(300);")
+            time.sleep(0.5)
+            check("…and the board shows all notes again", len(card_order()) == 3, card_order())
             ob.js("window.__fkmBoard.detach();")
 
         print("Archive and reminders")

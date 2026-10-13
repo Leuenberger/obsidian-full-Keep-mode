@@ -2144,6 +2144,43 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		}
 	}
 
+	// The notes with a label.
+	notesWithLabel(label) {
+		const lower = label.toLowerCase();
+		return this.app.vault.getMarkdownFiles().filter(file => this.labelsOf(file).some(l => l.toLowerCase() === lower));
+	}
+
+	// Keep's "Edit labels": rename a label in every note that has it, or delete it from
+	// them (to = null). The notes themselves stay.
+	async editLabel(from, to) {
+		const lower = from.toLowerCase();
+		for (const file of this.notesWithLabel(from)) {
+			if (to === null) {
+				await this.setLabel(file, from, false);
+				continue;
+			}
+			await this.app.fileManager.processFrontMatter(file, fm => {
+				for (const key of ["tags", "tag"]) {
+					const value = fm[key];
+					if (value === undefined || value === null) continue;
+					const tags = (Array.isArray(value) ? value : String(value).split(/[,\s]+/))
+						.map(t => String(t).replace(/^#/, "")).filter(Boolean);
+					if (!tags.some(t => t.toLowerCase() === lower)) continue;
+					const out = [];
+					for (const t of tags.map(t => (t.toLowerCase() === lower ? to : t))) {
+						if (!out.some(o => o.toLowerCase() === t.toLowerCase())) out.push(t);
+					}
+					fm[key] = out;
+				}
+			});
+		}
+		// The board showing this label follows it.
+		if (this.activeLabel?.toLowerCase() === `label:${lower}`) {
+			this.activeLabel = to === null ? "notes" : `label:${to}`;
+			await this.setFilter({ tag: to });
+		}
+	}
+
 	// Keep's "Show checkboxes" / "Hide checkboxes": turn the note's lines into a checklist or back.
 	async setCheckboxes(file, on) {
 		await this.app.vault.process(file, text => {
@@ -3104,6 +3141,12 @@ class LabelsView extends obsidian.ItemView {
 		const labels = this.plugin.allLabels();
 		if (labels.length) el.createDiv({ cls: "fkm-labels-heading", text: "Labels" });
 		for (const label of labels) item(`label:${label}`, "tag", label);
+		if (labels.length) {
+			const edit = el.createDiv({ cls: "fkm-labels-item fkm-labels-edit tappable" });
+			obsidian.setIcon(edit.createSpan({ cls: "fkm-labels-icon" }), "pencil");
+			edit.createSpan({ cls: "fkm-labels-text", text: "Edit labels" });
+			edit.addEventListener("click", () => new EditLabelsModal(this.plugin).open());
+		}
 		el.createDiv({ cls: "fkm-labels-separator" });
 		item("archive", "archive", "Archive");
 	}
@@ -3177,6 +3220,106 @@ class LabelModal extends obsidian.Modal {
 	}
 
 	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+// Keep's "Edit labels": every label with a bin (delete) and a pencil (rename); a new
+// name is saved with Enter, the tick, or when you click elsewhere.
+class EditLabelsModal extends obsidian.Modal {
+	constructor(plugin) {
+		super(plugin.app);
+		this.plugin = plugin;
+	}
+
+	onOpen() {
+		this.modalEl.addClass("fkm-edit-labels-modal");
+		this.titleEl.setText("Edit labels");
+		this.labels = this.plugin.allLabels();
+		this.list = this.contentEl.createDiv({ cls: "fkm-edit-labels-list" });
+		const footer = this.contentEl.createDiv({ cls: "fkm-edit-labels-footer" });
+		footer.createEl("button", { text: "Done" }).addEventListener("click", () => this.close());
+		this.renderList();
+	}
+
+	renderList() {
+		this.list.empty();
+		this.rows = [];
+		if (!this.labels.length) this.list.createDiv({ cls: "fkm-edit-labels-empty", text: "No labels" });
+		for (const label of this.labels) {
+			const row = this.list.createDiv({ cls: "fkm-edit-labels-row", attr: { "data-label": label } });
+			const remove = row.createSpan({ cls: "fkm-edit-labels-delete clickable-icon", attr: { "aria-label": "Delete label" } });
+			obsidian.setIcon(remove, "trash-2");
+			const input = row.createEl("input", { type: "text", value: label, attr: { "aria-label": "Label name" } });
+			const save = row.createSpan({ cls: "fkm-edit-labels-save clickable-icon", attr: { "aria-label": "Rename label" } });
+			obsidian.setIcon(save, "pencil");
+			const error = this.list.createDiv({ cls: "fkm-edit-labels-error" });
+			const entry = { label, input, error, busy: false };
+			this.rows.push(entry);
+			input.addEventListener("focus", () => obsidian.setIcon(save, "check"));
+			input.addEventListener("blur", () => obsidian.setIcon(save, "pencil"));
+			input.addEventListener("keydown", event => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					void this.rename(entry);
+				}
+			});
+			input.addEventListener("change", () => void this.rename(entry));
+			save.addEventListener("mousedown", event => event.preventDefault()); // keep the focus in the name
+			save.addEventListener("click", () => {
+				if (document.activeElement === input) void this.rename(entry);
+				else input.focus();
+			});
+			remove.addEventListener("click", () => this.confirmDelete(label));
+		}
+	}
+
+	async rename(entry) {
+		if (entry.busy) return;
+		const { label, input, error } = entry;
+		const name = LabelModal.cleanName(input.value);
+		error.setText("");
+		if (!name) {
+			input.value = label;
+			return;
+		}
+		if (name === label) {
+			input.value = label;
+			return;
+		}
+		if (name.toLowerCase() !== label.toLowerCase() && this.labels.some(l => l.toLowerCase() === name.toLowerCase())) {
+			error.setText("Label already exists");
+			return;
+		}
+		entry.busy = true;
+		input.disabled = true;
+		await this.plugin.editLabel(label, name);
+		this.labels = this.labels.map(l => (l === label ? name : l)).sort((a, b) => a.localeCompare(b));
+		this.renderList();
+	}
+
+	confirmDelete(label) {
+		const count = this.plugin.notesWithLabel(label).length;
+		const confirm = new obsidian.Modal(this.app);
+		confirm.modalEl.addClass("fkm-confirm-modal");
+		confirm.titleEl.setText("Delete label");
+		confirm.contentEl.createEl("p", { text: `"${label}" is removed from ${count === 1 ? "its note" : `its ${count} notes`}. The notes won't be deleted.` });
+		const buttons = confirm.contentEl.createDiv({ cls: "modal-button-container" });
+		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => confirm.close());
+		buttons.createEl("button", { text: "Delete", cls: "mod-warning" }).addEventListener("click", async () => {
+			confirm.close();
+			await this.plugin.editLabel(label, null);
+			this.labels = this.labels.filter(l => l !== label);
+			this.renderList();
+		});
+		confirm.open();
+	}
+
+	onClose() {
+		// A new name typed but not yet saved is saved too, like Keep's "Done".
+		for (const entry of this.rows ?? []) {
+			if (!entry.busy && entry.input.value !== entry.label) void this.rename(entry);
+		}
 		this.contentEl.empty();
 	}
 }

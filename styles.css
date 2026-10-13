@@ -1043,3 +1043,47 @@ body.fkm-keep.is-phone .notice-container {
 	top: auto !important;
 	bottom: calc(var(--safe-area-inset-bottom, 0px) + 80px) !important;
 }
+
+/* ===== Keep's "Edit labels" ===== */
+.fkm-edit-labels-modal {
+	width: min(340px, calc(100vw - 32px));
+}
+
+.fkm-edit-labels-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 2px 0;
+}
+
+.fkm-edit-labels-row input {
+	flex: 1;
+	min-width: 0;
+	border-color: transparent;
+	background: transparent;
+}
+
+.fkm-edit-labels-row input:focus {
+	border-color: var(--background-modifier-border-focus);
+}
+
+.fkm-edit-labels-error {
+	color: var(--text-error);
+	font-size: var(--font-ui-smaller);
+	padding-inline-start: 40px;
+}
+
+.fkm-edit-labels-error:empty {
+	display: none;
+}
+
+.fkm-edit-labels-empty {
+	color: var(--text-muted);
+	padding: 8px 0;
+}
+
+.fkm-edit-labels-footer {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 12px;
+}
