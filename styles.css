@@ -229,6 +229,7 @@ body.fkm-card-drag-active {
 
 /* Keep's checkbox: a clear 2 px outline (light on dark notes), no fill when ticked. */
 .fkm-checkbox .task-list-item-checkbox,
+.fkm-ghost-item .task-list-item-checkbox,
 .fkm-card-item .fkm-card-check {
 	--fkm-box: rgba(0, 0, 0, 0.6);
 	border: 2px solid var(--fkm-box) !important;
@@ -237,11 +238,13 @@ body.fkm-card-drag-active {
 }
 
 .theme-dark .fkm-checkbox .task-list-item-checkbox,
+.theme-dark .fkm-ghost-item .task-list-item-checkbox,
 .theme-dark .fkm-card-item .fkm-card-check {
 	--fkm-box: rgba(255, 255, 255, 0.7);
 }
 
 .fkm-checkbox .task-list-item-checkbox:checked::after,
+.fkm-ghost-item .task-list-item-checkbox:checked::after,
 .fkm-card-item .fkm-card-check:checked::after {
 	background-color: var(--fkm-box) !important;
 }
