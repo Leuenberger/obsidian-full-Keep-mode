@@ -607,7 +607,7 @@ def main():
             colours = ob.js(PRELUDE + """const card = [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md'));
                 document.body.classList.contains('theme-light');
                 return { card: getComputedStyle(card).backgroundColor, cls: card.className, light: document.body.classList.contains('theme-light') };""")
-            check("cards have Keep's colours (Fog for blue)", not colours["light"] or colours["card"] == "rgb(212, 228, 237)", colours)
+            check("cards have Keep's colours (Fog for blue)", not colours["light"] or colours["card"] == "rgb(203, 240, 248)", colours)
 
             # A pop-up stays with its board's tab while another tab is in front.
             ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card A.md');
@@ -616,7 +616,7 @@ def main():
                 [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md')).querySelector('.fkm-card-title').click();
                 await wait(1200);""")
             header = ob.js("""const m = [...document.querySelectorAll('.fkm-note-modal')].pop(); const h = m?.querySelector('.view-header'); return h ? getComputedStyle(h).backgroundColor : null;""")
-            check("the open note's top bar has the note's colour", header == "rgb(212, 228, 237)" or not colours["light"], header)
+            check("the open note's top bar has the note's colour", header == "rgb(203, 240, 248)" or not colours["light"], header)
             def tab_click(js):
                 r = ob.js(js)
                 ob.mouse("mouseMoved", r["x"], r["y"], 0); ob.mouse("mousePressed", r["x"], r["y"]); ob.mouse("mouseReleased", r["x"], r["y"], 0)

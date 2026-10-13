@@ -646,29 +646,29 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 
 /* ===== The open note: its colour (the same shade as its card) and its Keep title ===== */
 /* Google Keep's colours (Coral, Peach, Sand, Mint, Sage, Fog, Storm, Dusk, Blossom,
-   Clay, Chalk), in light and dark mode. */
-.fkm-color-red { --fkm-note-bg: #faafa8; }
-.fkm-color-orange { --fkm-note-bg: #f39f76; }
-.fkm-color-yellow { --fkm-note-bg: #fff8b8; }
-.fkm-color-green { --fkm-note-bg: #e2f6d3; }
-.fkm-color-cyan { --fkm-note-bg: #b4ddd3; }
-.fkm-color-blue { --fkm-note-bg: #d4e4ed; }
-.fkm-color-cerulean { --fkm-note-bg: #aeccdc; }
-.fkm-color-purple { --fkm-note-bg: #d3bfdb; }
-.fkm-color-pink { --fkm-note-bg: #f6e2dd; }
-.fkm-color-brown { --fkm-note-bg: #e9e3d4; }
-.fkm-color-gray { --fkm-note-bg: #efeff1; }
-.theme-dark .fkm-color-red { --fkm-note-bg: #77172e; }
-.theme-dark .fkm-color-orange { --fkm-note-bg: #692b17; }
-.theme-dark .fkm-color-yellow { --fkm-note-bg: #7c4a03; }
-.theme-dark .fkm-color-green { --fkm-note-bg: #264d3b; }
-.theme-dark .fkm-color-cyan { --fkm-note-bg: #0c625d; }
-.theme-dark .fkm-color-blue { --fkm-note-bg: #2d5259; }
-.theme-dark .fkm-color-cerulean { --fkm-note-bg: #284255; }
-.theme-dark .fkm-color-purple { --fkm-note-bg: #472e5b; }
-.theme-dark .fkm-color-pink { --fkm-note-bg: #6c394f; }
-.theme-dark .fkm-color-brown { --fkm-note-bg: #4b443a; }
-.theme-dark .fkm-color-gray { --fkm-note-bg: #232427; }
+   Clay, Chalk), in light and dark mode, as Keep's phone apps show them. */
+.fkm-color-red { --fkm-note-bg: #f28b82; }
+.fkm-color-orange { --fkm-note-bg: #fbbc04; }
+.fkm-color-yellow { --fkm-note-bg: #fff475; }
+.fkm-color-green { --fkm-note-bg: #ccff90; }
+.fkm-color-cyan { --fkm-note-bg: #a7ffeb; }
+.fkm-color-blue { --fkm-note-bg: #cbf0f8; }
+.fkm-color-cerulean { --fkm-note-bg: #aecbfa; }
+.fkm-color-purple { --fkm-note-bg: #d7aefb; }
+.fkm-color-pink { --fkm-note-bg: #fdcfe8; }
+.fkm-color-brown { --fkm-note-bg: #e6c9a8; }
+.fkm-color-gray { --fkm-note-bg: #e8eaed; }
+.theme-dark .fkm-color-red { --fkm-note-bg: #5c2b29; }
+.theme-dark .fkm-color-orange { --fkm-note-bg: #614a19; }
+.theme-dark .fkm-color-yellow { --fkm-note-bg: #635d19; }
+.theme-dark .fkm-color-green { --fkm-note-bg: #345920; }
+.theme-dark .fkm-color-cyan { --fkm-note-bg: #16504b; }
+.theme-dark .fkm-color-blue { --fkm-note-bg: #2d555e; }
+.theme-dark .fkm-color-cerulean { --fkm-note-bg: #1e3a5f; }
+.theme-dark .fkm-color-purple { --fkm-note-bg: #42275e; }
+.theme-dark .fkm-color-pink { --fkm-note-bg: #5b2245; }
+.theme-dark .fkm-color-brown { --fkm-note-bg: #442f19; }
+.theme-dark .fkm-color-gray { --fkm-note-bg: #3c3f43; }
 
 /* Everything inside takes the colour as its background. */
 .fkm-note-colored > .workspace-leaf-content,

@@ -69,17 +69,17 @@ const DEVICE_SETTINGS = [];
 const LABELS_VIEW = "full-keep-mode-labels";
 const COLORS = [
 	{ id: null, name: "Default" },
-	{ id: "red", name: "Coral", hex: "#faafa8" },
-	{ id: "orange", name: "Peach", hex: "#f39f76" },
-	{ id: "yellow", name: "Sand", hex: "#fff8b8" },
-	{ id: "green", name: "Mint", hex: "#e2f6d3" },
-	{ id: "cyan", name: "Sage", hex: "#b4ddd3" },
-	{ id: "blue", name: "Fog", hex: "#d4e4ed" },
-	{ id: "cerulean", name: "Storm", hex: "#aeccdc" },
-	{ id: "purple", name: "Dusk", hex: "#d3bfdb" },
-	{ id: "pink", name: "Blossom", hex: "#f6e2dd" },
-	{ id: "brown", name: "Clay", hex: "#e9e3d4" },
-	{ id: "gray", name: "Chalk", hex: "#efeff1" },
+	{ id: "red", name: "Coral", hex: "#f28b82" },
+	{ id: "orange", name: "Peach", hex: "#fbbc04" },
+	{ id: "yellow", name: "Sand", hex: "#fff475" },
+	{ id: "green", name: "Mint", hex: "#ccff90" },
+	{ id: "cyan", name: "Sage", hex: "#a7ffeb" },
+	{ id: "blue", name: "Fog", hex: "#cbf0f8" },
+	{ id: "cerulean", name: "Storm", hex: "#aecbfa" },
+	{ id: "purple", name: "Dusk", hex: "#d7aefb" },
+	{ id: "pink", name: "Blossom", hex: "#fdcfe8" },
+	{ id: "brown", name: "Clay", hex: "#e6c9a8" },
+	{ id: "gray", name: "Chalk", hex: "#e8eaed" },
 ];
 // Keep's colour names (in exports) -> ours.
 const KEEP_COLORS = {
