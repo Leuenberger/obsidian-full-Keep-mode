@@ -605,6 +605,8 @@ function checklistExtension(plugin) {
 	});
 
 	// Keep-style keys in checklists:
+	//  - Enter at the end of an item with sub-items starts a new first sub-item (not a
+	//    new item that would take the sub-items over).
 	//  - Shift+Enter starts a new line inside the item, lined up with its text.
 	//  - Backspace at the start of an item's text (or of a line inside an item) joins
 	//    it to the line above (an empty item disappears), instead of breaking up the
@@ -637,6 +639,28 @@ function checklistExtension(plugin) {
 				const end = textStart(state.doc, next);
 				if (end === null) return false;
 				view.dispatch({ changes: { from: line.to, to: end }, userEvent: "delete.forward" });
+				return true;
+			},
+		},
+		{
+			key: "Enter",
+			run: view => {
+				const { state } = view;
+				const sel = state.selection.main;
+				if (state.selection.ranges.length > 1 || !sel.empty || !livePreview(state) || !enabledFor(state)) return false;
+				const unit = indentUnit(app);
+				const line = state.doc.lineAt(sel.head);
+				const block = findBlock(state.doc, line.number, unit);
+				const index = block ? block.items.findIndex(i => i.line <= line.number && line.number <= i.line + i.extra.length) : -1;
+				if (index < 0) return false;
+				const item = block.items[index];
+				const next = block.items[index + 1];
+				const last = state.doc.line(item.line + item.extra.length);
+				if (sel.head !== last.to || !next || next.depth <= item.depth || !item.text.trim()) return false;
+				const task = parseTask(state.doc.line(item.line).text, unit);
+				const pad = unit.useTab ? "\t".repeat(item.depth + 1) : " ".repeat(unit.tabSize * (item.depth + 1));
+				const insert = `\n${pad}${task?.bullet ?? "-"} [ ] `;
+				view.dispatch({ changes: { from: last.to, insert }, selection: { anchor: last.to + insert.length }, userEvent: "input", scrollIntoView: true });
 				return true;
 			},
 		},
@@ -2711,8 +2735,10 @@ class NoteModal extends obsidian.Modal {
 		const content = this.contentEl;
 		content.empty();
 		content.addClass("fkm-loading"); // shown once complete, not half-drawn
-		if (obsidian.Platform.isPhone) this.backArrow();
-		else if (this.boardLeaf) this.fitToBoard();
+		if (obsidian.Platform.isPhone) {
+			this.backArrow();
+			this.swipeDownHidesKeyboard();
+		} else if (this.boardLeaf) this.fitToBoard();
 		try {
 			this.leaf = this.plugin.takePopupLeaf();
 			content.appendChild(this.leaf.containerEl);
@@ -2733,6 +2759,25 @@ class NoteModal extends obsidian.Modal {
 			close.empty();
 			obsidian.setIcon(close, "arrow-left");
 		}
+	}
+
+	// Phones: swiping down over the note puts the keyboard away, like in Keep.
+	swipeDownHidesKeyboard() {
+		let start = null;
+		this.modalEl.addEventListener("touchstart", event => {
+			const t = event.touches[0];
+			start = event.touches.length === 1 && !event.target.closest(".fkm-grip") ? { x: t.clientX, y: t.clientY } : null;
+		}, { passive: true });
+		this.modalEl.addEventListener("touchmove", event => {
+			if (!start) return;
+			const t = event.touches[0];
+			const dy = t.clientY - start.y;
+			if (dy < 40 || Math.abs(t.clientX - start.x) > dy) return;
+			start = null;
+			const focused = document.activeElement;
+			if (focused instanceof HTMLElement && this.modalEl.contains(focused) && focused.isContentEditable) focused.blur();
+		}, { passive: true });
+		this.modalEl.addEventListener("touchend", () => { start = null; }, { passive: true });
 	}
 
 	// Computers: cover just the board's tab, and wait there while another tab is in front.

@@ -221,27 +221,61 @@ body.fkm-card-drag-active {
 	padding-top: 0.45em !important;
 }
 
-/* Phones: Keep's measures (checkbox 14 px, list set in from the edge, so the grips
-   have room on the left). */
-.is-phone .cm-line.fkm-task,
-.is-phone .cm-line.fkm-extra {
-	--checkbox-size: 14px;
-}
-
-/* Keep's margins: title and text 12 px from the edge, checklists set in further. */
-.is-phone .fkm-note-modal {
-	--file-margins: 12px;
-}
-
-.is-phone .fkm-note-modal .cm-line.fkm-task,
-.is-phone .fkm-note-modal .cm-line.fkm-extra {
-	margin-inline-start: 22px !important;
-}
-
 /* Keep's gap between the checkbox and the item's text. */
 .fkm-checkbox .task-list-item-checkbox {
 	margin-inline-end: 0.9em !important;
 	vertical-align: middle;
+}
+
+/* Keep's checkbox: a clear 2 px outline (light on dark notes), no fill when ticked. */
+.fkm-checkbox .task-list-item-checkbox,
+.fkm-card-item .fkm-card-check {
+	--fkm-box: rgba(0, 0, 0, 0.6);
+	border: 2px solid var(--fkm-box) !important;
+	border-radius: 3px !important;
+	background-color: transparent !important;
+}
+
+.theme-dark .fkm-checkbox .task-list-item-checkbox,
+.theme-dark .fkm-card-item .fkm-card-check {
+	--fkm-box: rgba(255, 255, 255, 0.7);
+}
+
+.fkm-checkbox .task-list-item-checkbox:checked::after,
+.fkm-card-item .fkm-card-check:checked::after {
+	background-color: var(--fkm-box) !important;
+}
+
+/* Phones: Keep's measures, taken from Keep's iPhone app side by side with this one:
+   checkbox 18 px, 22 px to the text, sub-items 30 px in, items 35 px apart. */
+.is-phone .cm-line.fkm-task,
+.is-phone .cm-line.fkm-extra {
+	--checkbox-size: 18px;
+	--list-indent: 30px;
+	line-height: 1.15;
+}
+
+.is-phone .cm-line.fkm-task {
+	padding-top: 12px !important;
+}
+
+.is-phone .fkm-checkbox .task-list-item-checkbox {
+	margin-inline-end: 18px !important;
+}
+
+body.is-phone .fkm-grip svg {
+	width: 28px;
+	height: 28px;
+}
+
+/* Keep's margins: title and text 15 px from the edge, checklists set in further. */
+.is-phone .fkm-note-modal {
+	--file-margins: 15px;
+}
+
+.is-phone .fkm-note-modal .cm-line.fkm-task,
+.is-phone .fkm-note-modal .cm-line.fkm-extra {
+	margin-inline-start: 28px !important;
 }
 
 /* Keep has no indentation lines; here they'd run through the sub-items' grips. */
@@ -286,6 +320,11 @@ body.fkm-card-drag-active {
 
 .fkm-grip:active {
 	cursor: grabbing;
+}
+
+/* Keep's handles on a dark note: faint and light, not dark grey. */
+.theme-dark .fkm-grip {
+	color: rgba(255, 255, 255, 0.35);
 }
 
 .cm-line.fkm-item-dragging {
@@ -601,7 +640,7 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 
 /* The pop-up's close button becomes Keep's back arrow, top left. */
 .is-phone .modal .fkm-back-button {
-	left: var(--size-4-3, 12px) !important;
+	left: 16px !important;
 	right: auto !important;
 }
 
@@ -624,7 +663,7 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 .theme-dark .fkm-color-yellow { --fkm-note-bg: #7c4a03; }
 .theme-dark .fkm-color-green { --fkm-note-bg: #264d3b; }
 .theme-dark .fkm-color-cyan { --fkm-note-bg: #0c625d; }
-.theme-dark .fkm-color-blue { --fkm-note-bg: #256377; }
+.theme-dark .fkm-color-blue { --fkm-note-bg: #2d5259; }
 .theme-dark .fkm-color-cerulean { --fkm-note-bg: #284255; }
 .theme-dark .fkm-color-purple { --fkm-note-bg: #472e5b; }
 .theme-dark .fkm-color-pink { --fkm-note-bg: #6c394f; }

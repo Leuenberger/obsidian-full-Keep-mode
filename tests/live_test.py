@@ -364,6 +364,22 @@ def main():
         key("Backspace", 8)
         check("…and Backspace at its start joins it back to the item", text() == "- [ ] A\n\t- [ ] Bsecond\n- [ ] C\n", repr(text()))
 
+        # Enter at the end of an item with sub-items: a new first sub-item, like Keep.
+        def enter_at_end_of(line_no):
+            ob.js(PRELUDE + f"const cm = window.__tcLeaf.view.editor.cm; cm.focus(); cm.dispatch({{ selection: {{ anchor: cm.state.doc.line({line_no}).to }} }}); await wait(200);")
+            ob.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text="\r", unmodifiedText="\r")
+            ob.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+            time.sleep(0.4)
+            ob.call("Input.insertText", text="New")
+            time.sleep(0.4)
+            return text()
+        open_note("enter parent", "- [ ] A\n\t- [ ] B\n- [ ] C\n")
+        after = enter_at_end_of(1)
+        check("Enter at the end of an item with sub-items starts a new first sub-item", after == "- [ ] A\n\t- [ ] New\n\t- [ ] B\n- [ ] C\n", repr(after))
+        open_note("enter plain", "- [ ] A\n\t- [ ] B\n- [ ] C\n")
+        after = enter_at_end_of(3)
+        check("…and at the end of one without, a new item as usual", after == "- [ ] A\n\t- [ ] B\n- [ ] C\n- [ ] New\n", repr(after))
+
         print("Keep-style editing")
         open_note("editing", "---\ntags:\n  - Shopping\nkeep_created: 2024-11-10T02:44:02\n---\n- [ ] Alpha\n- [ ] Beta\n→- [x] Gamma\n".replace("→", "\t"))
         boxes = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc;
