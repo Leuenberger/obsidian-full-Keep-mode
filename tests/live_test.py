@@ -503,6 +503,7 @@ def main():
             const fm = n => app.metadataCache.getFileCache(app.vault.getAbstractFileByPath(FOLDER + '/import/' + n + '.md'))?.frontmatter ?? {{}};
             return {{ r, packing: await read('Packing'), links: await read('Links'), milk: await read('Buy milk'),
                       packingFm: fm('Packing'), linksFm: fm('Links'),
+                      packingMtime: app.vault.getAbstractFileByPath(FOLDER + '/import/Packing.md').stat.mtime,
                       milkTitle: p.titleOf(app.vault.getAbstractFileByPath(FOLDER + '/import/Buy milk.md')) }};""")
         r = imported["r"]
         check("all notes come in (Keep's trash is left out)", r["imported"] == 3 and r["skipped"] == 1, r)
@@ -513,6 +514,7 @@ def main():
         check("the board order, pin, colour, labels and dates come along",
               fm.get("keep_order") == 300 and fm.get("keep_pinned") is True and fm.get("keep_color") == "cerulean"
               and fm.get("tags") == ["Book-club"] and fm.get("keep_created") == "2024-11-10T02:44:02", fm)
+        check("…and the note's last edit is Keep's", imported["packingMtime"] == 1731294316000, imported["packingMtime"])
         check("archived and grey notes too", imported["linksFm"].get("keep_archived") is True and imported["linksFm"].get("keep_color") == "gray", imported["linksFm"])
         check("links to other Keep notes become Obsidian links", "See [[Packing]] please" in imported["links"], imported["links"])
         check("an untitled Keep note shows no title", imported["milkTitle"] == "" and "Buy milk" in imported["milk"], imported)

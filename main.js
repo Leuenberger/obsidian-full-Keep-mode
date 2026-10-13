@@ -2647,7 +2647,6 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const folder = obsidian.normalizePath(folderName || "Keep");
 		if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
 		const byName = new Map(source.files.map(f => [f.name, f]));
-		const fs = obsidian.Platform.isDesktopApp && typeof window.require === "function" ? window.require("fs") : null;
 		const result = { kind, imported: 0, skipped: 0, files: 0, missingFiles: 0, subItems: 0 };
 		// First the names of all notes, so links between Keep notes become Obsidian links.
 		const names = new Map(); // note -> file name
@@ -2696,18 +2695,11 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				result.files++;
 			}
 			const markdown = this.keepMarkdown(note, name, embeds);
-			const created = await this.app.vault.create(notePath, markdown);
+			// The note's "Edited" date is Keep's.
+			const edited = note.edited ? new Date(note.edited).getTime() : NaN;
+			await this.app.vault.create(notePath, markdown, isNaN(edited) ? undefined : { mtime: edited });
 			result.imported++;
 			result.subItems += (note.items ?? []).reduce((sum, item) => sum + (item.children?.length ?? 0), 0);
-			// The note's "Edited" date is Keep's.
-			const edited = note.edited ? new Date(note.edited) : null;
-			if (fs && edited && !isNaN(edited)) {
-				try {
-					fs.utimesSync(this.app.vault.adapter.getFullPath(created.path), edited, edited);
-				} catch {
-					// not important
-				}
-			}
 			if (done % 20 === 0) report(`${done} of ${notes.length} notes…`);
 		}
 		return result;
