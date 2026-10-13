@@ -233,23 +233,23 @@ Apple Shortcut put each reminder in the **Reminders** app. Set it up once:
 1. Open the **Shortcuts** app, tap **+**, and name the new shortcut
    **Keep reminder**.
 2. Add the action **Split Text**, and set it to split **Shortcut Input** by
-   **New Lines**. (If "Shortcut Input" isn't offered, tap the shortcut's name
-   at the top and let it receive **Text**.)
+   **New Lines**.
 3. Add **Get Item from List**: the **First Item** of **Split Text**.
 4. Add **Get Dates from Input**, with that **Item from List** as input.
 5. Add another **Get Item from List**: the **Item At Index 2** of
    **Split Text** (the note's title).
-6. Add **Add New Reminder**: as the reminder, choose that last
-   **Item from List**; open its options, turn on **Remind Me** **At a Time**,
-   and choose **Dates** as the time.
-7. In Obsidian: **Settings → Full Keep Mode → Reminders via Apple Shortcuts**.
+6. Add **Add New Reminder**: add that last **Item from List**, with **Dates**
+   as its alert.
+7. Add another **Get Item from List**: the **Item At Index 3** of
+   **Split Text** (the link to the note), and then **Open URLs** with it, to
+   come back to the note.
+8. In Obsidian: **Settings → Full Keep Mode → Reminders via Apple Shortcuts**
+   (a setting of each device).
 
 From then on, setting a reminder in a note briefly opens Shortcuts, which adds
-it to Reminders and returns to the note. The shortcut gets three lines (via the
-clipboard, which they replace): the
-time (`2026-10-14 08:00`), the note's title, and a link back to the note, which
-you can add to the reminder's URL too. If you change or delete a reminder in
-Obsidian later, change it in Reminders as well.
+it to Reminders and returns to the note. The shortcut gets three lines: the
+time (`2026-10-14 08:00`), the note's title, and a link back to the note. If you
+change or delete a reminder in Obsidian later, change it in Reminders as well.
 
 ## Development
 

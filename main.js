@@ -1580,23 +1580,16 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	// (plugins can't schedule notifications themselves). The shortcut gets three
 	// lines: the time ("2026-10-14 08:00"), the note's title and a link to the note,
 	// and afterwards returns to the note.
-	// The three lines go via the clipboard (input=clipboard): text passed in the link
-	// itself didn't reach the shortcut on an iPhone.
-	async sendToShortcut(file, time) {
+	// Apple's documented form (shortcuts://run-shortcut?name=…&input=text&text=…); the
+	// clipboard is never touched. The shortcut's last action opens the link (third line)
+	// to come back to the note.
+	sendToShortcut(file, time) {
 		const title = this.titleOf(file) || file.basename;
 		const link = `obsidian://open?vault=${encodeURIComponent(this.app.vault.getName())}&file=${encodeURIComponent(file.path)}`;
 		const input = [time.format("YYYY-MM-DD HH:mm"), title, link].join("\n");
-		const url = "shortcuts://x-callback-url/run-shortcut"
+		const url = "shortcuts://run-shortcut"
 			+ `?name=${encodeURIComponent(this.settings.shortcutName || "Keep reminder")}`
-			+ "&input=clipboard"
-			+ `&x-success=${encodeURIComponent(link)}`;
-		try {
-			await navigator.clipboard.writeText(input);
-		} catch (error) {
-			console.error("[Full Keep Mode] Couldn't copy the reminder for the shortcut:", error);
-			new obsidian.Notice("Couldn't hand the reminder to the shortcut.");
-			return null;
-		}
+			+ `&input=text&text=${encodeURIComponent(input)}`;
 		window.open(url);
 		return url;
 	}
@@ -2903,7 +2896,7 @@ class ReminderModal extends obsidian.Modal {
 			await plugin.setReminder(file, time);
 			this.close();
 			new obsidian.Notice(time ? `Reminder set: ${time.format("ddd D MMM, HH:mm")}` : "Reminder removed");
-			if (time && plugin.settings.shortcutReminders) await plugin.sendToShortcut(file, time);
+			if (time && plugin.settings.shortcutReminders) plugin.sendToShortcut(file, time);
 		};
 
 		const later = now.clone().hour(20).minute(0).second(0); // Keep: 8 PM
