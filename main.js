@@ -185,6 +185,12 @@ function findBlocks(doc, unit) {
 			continue;
 		}
 		if (!block) continue;
+		if (text.length && isBlank(text) && isIndented(text)) {
+			// A new line inside an item (Shift+Enter), still empty: it belongs to the item.
+			block.items[block.items.length - 1].extra.push(text);
+			block.toLine = n;
+			continue;
+		}
 		if (isBlank(text)) {
 			let next = n + 1;
 			while (next <= doc.lines && isBlank(doc.line(next).text)) next++;
@@ -521,7 +527,7 @@ function checklistExtension(plugin) {
 				// replace the rest of the leading whitespace by a spacer.
 				for (let k = 1; k <= item.extra.length; k++) {
 					const line = doc.line(item.line + k);
-					if (isBlank(line.text)) continue;
+					if (!line.text.length) continue;
 					const lead = line.text.match(/^[ \t]*/)[0];
 					const keep = Math.min(item.indent.length, lead.length);
 					const keepOk = lead.slice(0, keep) === item.indent.slice(0, keep);
@@ -565,6 +571,16 @@ function checklistExtension(plugin) {
 		const m = TASK_RE.exec(line.text);
 		return m ? Math.min(line.from + m[1].length + 6, line.to) : null;
 	};
+	// Where the text of a checklist line starts: after "- [ ] " on an item's line, after
+	// the indentation on an item's extra line (Shift+Enter); null on other lines.
+	const textStart = (doc, line) => {
+		const end = prefixEnd(line);
+		if (end !== null) return end;
+		if (!isIndented(line.text)) return null;
+		const block = findBlock(doc, line.number, indentUnit(app));
+		if (!block || block.items.some(item => item.line === line.number)) return null;
+		return line.from + line.text.match(/^[ \t]*/)[0].length;
+	};
 	const keepCursorOut = EditorState.transactionFilter.of(tr => {
 		if (!tr.selection || !livePreview(tr.state) || !enabledFor(tr.state)) return tr;
 		const doc = tr.newDoc;
@@ -574,7 +590,7 @@ function checklistExtension(plugin) {
 		let changed = false;
 		const fix = pos => {
 			const line = doc.lineAt(pos);
-			const end = prefixEnd(line);
+			const end = textStart(doc, line);
 			if (end === null || pos >= end) return pos;
 			changed = true;
 			// Left from the start of the text: to the end of the line above.
@@ -588,9 +604,11 @@ function checklistExtension(plugin) {
 	});
 
 	// Keep-style keys in checklists:
-	//  - Backspace at the start of an item's text joins it to the line above
-	//    (an empty item disappears), instead of breaking up the "- [ ]".
-	//  - Delete at the end of a line joins the next item's text to it.
+	//  - Shift+Enter starts a new line inside the item, lined up with its text.
+	//  - Backspace at the start of an item's text (or of a line inside an item) joins
+	//    it to the line above (an empty item disappears), instead of breaking up the
+	//    "- [ ]" or the indentation.
+	//  - Delete at the end of a line joins the next item's text (or line) to it.
 	//  - Ctrl/Cmd+A selects the note's text, not its properties.
 	const keepKeys = Prec.highest(keymap.of([
 		{
@@ -600,7 +618,7 @@ function checklistExtension(plugin) {
 				const sel = state.selection.main;
 				if (state.selection.ranges.length > 1 || !sel.empty || !livePreview(state) || !enabledFor(state)) return false;
 				const line = state.doc.lineAt(sel.head);
-				if (prefixEnd(line) !== sel.head) return false;
+				if (textStart(state.doc, line) !== sel.head) return false;
 				if (line.from <= bodyStart(state.doc)) return true; // the very first item: nothing to join to
 				view.dispatch({ changes: { from: line.from - 1, to: sel.head }, selection: { anchor: line.from - 1 }, userEvent: "delete.backward", scrollIntoView: true });
 				return true;
@@ -615,9 +633,24 @@ function checklistExtension(plugin) {
 				const line = state.doc.lineAt(sel.head);
 				if (sel.head !== line.to || line.number >= state.doc.lines) return false;
 				const next = state.doc.line(line.number + 1);
-				const end = prefixEnd(next);
+				const end = textStart(state.doc, next);
 				if (end === null) return false;
 				view.dispatch({ changes: { from: line.to, to: end }, userEvent: "delete.forward" });
+				return true;
+			},
+		},
+		{
+			key: "Shift-Enter",
+			run: view => {
+				const { state } = view;
+				if (state.selection.ranges.length > 1 || !livePreview(state) || !enabledFor(state)) return false;
+				const unit = indentUnit(app);
+				const line = state.doc.lineAt(state.selection.main.head);
+				const block = findBlock(state.doc, line.number, unit);
+				const item = block ? [...block.items].reverse().find(i => i.line <= line.number) : null;
+				if (!item) return false; // not in a checklist: Obsidian's usual Shift+Enter
+				const indent = unit.useTab ? "\t".repeat(item.depth + 1) : " ".repeat(unit.tabSize * (item.depth + 1));
+				view.dispatch(state.replaceSelection(`\n${indent}`), { userEvent: "input", scrollIntoView: true });
 				return true;
 			},
 		},

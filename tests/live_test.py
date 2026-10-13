@@ -342,6 +342,28 @@ def main():
         all_x = xs["first"] + xs["second"] + xs["third"] + xs["next"]
         check("extra lines and wrapped lines start under the item's text", len(set(all_x)) == 1, xs)
 
+        # Shift+Enter: a new line inside the item, lined up, no indentation lines, and
+        # Backspace at its start joins it back.
+        open_note("shift enter", "- [ ] A\n\t- [ ] B\n- [ ] C\n")
+        ob.js(PRELUDE + "const cm = window.__tcLeaf.view.editor.cm; cm.focus(); cm.dispatch({ selection: { anchor: cm.state.doc.line(2).to } }); await wait(200);")
+        ob.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, modifiers=8, text="\r", unmodifiedText="\r")
+        ob.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13, modifiers=8)
+        time.sleep(0.5)
+        empty_line = ob.js(PRELUDE + """await wait(300); const l = [...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.cm-line')][2];
+            const g = l.querySelector('.cm-indent'); return { extra: l.classList.contains('fkm-extra'), guide: g ? getComputedStyle(g, '::before').display : 'none' };""")
+        check("Shift+Enter starts a line inside the item, without indentation lines",
+              text() == "- [ ] A\n\t- [ ] B\n\t\t\n- [ ] C\n" and empty_line == {"extra": True, "guide": "none"}, (repr(text()), empty_line))
+        ob.call("Input.insertText", text="second")
+        time.sleep(0.4)
+        xs = ob.js(r"""const ls = [...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.cm-line')];
+            const xOf = (l, word) => { const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n;
+                while ((n = w.nextNode())) { const i = n.textContent.indexOf(word); if (i >= 0) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1); return Math.round(r.getBoundingClientRect().left); } } return null; };
+            return [xOf(ls[1], 'B'), xOf(ls[2], 'second')];""")
+        check("…typed text starts right under the item's text", xs[0] is not None and xs[0] == xs[1], xs)
+        key("Home", 36)
+        key("Backspace", 8)
+        check("…and Backspace at its start joins it back to the item", text() == "- [ ] A\n\t- [ ] Bsecond\n- [ ] C\n", repr(text()))
+
         print("Keep-style editing")
         open_note("editing", "---\ntags:\n  - Shopping\nkeep_created: 2024-11-10T02:44:02\n---\n- [ ] Alpha\n- [ ] Beta\n→- [x] Gamma\n".replace("→", "\t"))
         boxes = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc;
