@@ -6,6 +6,7 @@ shows where the clicks go (screenshots don't include the real one).
 
     pip install websocket-client pillow
     python tests/record_board_demo.py      (keep the Obsidian window visible)
+    python tests/record_board_demo.py --dark   (docs/board-dark.gif, in dark mode)
 """
 import base64
 import io
@@ -19,7 +20,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 import live_test as lt  # noqa: E402  (reuses its Obsidian connection and helpers)
 
-OUT = Path(__file__).resolve().parent.parent / "docs" / "board.gif"
+DARK = "--dark" in sys.argv
+OUT = Path(__file__).resolve().parent.parent / "docs" / ("board-dark.gif" if DARK else "board.gif")
 FOLDER = lt.FOLDER
 
 NOTES = {
@@ -69,6 +71,9 @@ def setup():
             fm.append("tags:\n" + "\n".join(f"  - {t}" for t in tags))
         notes[name] = "---\n" + "\n".join(fm) + "\n---\n" + body
     lt.ob.js(lt.PRELUDE + f"""
+    // Dark mode for this recording only (Obsidian's own setting stays as it is).
+    window.__demoTheme = document.body.hasClass("theme-dark") ? "theme-dark" : "theme-light";
+    if ({json.dumps(DARK)}) {{ document.body.removeClass("theme-light"); document.body.addClass("theme-dark"); }}
     document.querySelectorAll(".modal-container").forEach(m => {{ m.dataset.tcHidden = "1"; m.style.visibility = "hidden"; }});
     if (!app.vault.getAbstractFileByPath(FOLDER)) await app.vault.createFolder(FOLDER);
     for (const [name, text] of Object.entries({json.dumps(notes)})) {{
@@ -247,6 +252,7 @@ finally:
     if (window.__demoLeftOpen) app.workspace.leftSplit.expand();
     if (window.__demoRightOpen) app.workspace.rightSplit.expand();
     document.querySelectorAll(".modal-container[data-tc-hidden]").forEach(m => { m.style.visibility = ""; delete m.dataset.tcHidden; });
+    if (window.__demoTheme) { document.body.removeClass("theme-light", "theme-dark"); document.body.addClass(window.__demoTheme); }
     """)
 
 OUT.parent.mkdir(exist_ok=True)
