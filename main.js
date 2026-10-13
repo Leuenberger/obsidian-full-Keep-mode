@@ -1051,6 +1051,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				.onClick(() => void this.setCheckboxes(file, !has)));
 		}));
 		this.app.workspace.onLayoutReady(() => {
+			if (!this._loaded) return; // turned off (reloaded or updated) in the meantime
 			if (this.settings.labelsSidebar) void this.openLabelsView(false);
 			// The board as the home screen, like Keep: at start, and on phones instead of
 			// an empty "New tab" (e.g. after closing the board by accident).
@@ -1086,6 +1087,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 		// Reminders: check now (catching up on missed ones) and every 20 seconds.
 		this.app.workspace.onLayoutReady(() => {
+			if (!this._loaded) return; // turned off (reloaded or updated) in the meantime
 			void this.checkReminders(true);
 			this.registerInterval(window.setInterval(() => void this.checkReminders(), 20000));
 		});
@@ -1101,6 +1103,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			// Boards still drawn by an earlier copy of the plugin (after an update or a
 			// reload): draw them again with this one.
 			this.app.workspace.onLayoutReady(() => {
+				if (!this._loaded) return; // turned off (reloaded or updated) in the meantime
 				for (const leaf of this.app.workspace.getLeavesOfType("bases")) {
 					const view = leaf.view?.controller?.view;
 					if (view?.type === BOARD_VIEW && !(view instanceof KeepBoardView)) void leaf.rebuildView?.();
@@ -1593,7 +1596,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	// 20 seconds while Obsidian runs, and once at start (catching up on any that
 	// fell due while Obsidian was closed).
 	async checkReminders(atStart = false) {
-		if (!this.settings.reminders) return;
+		// Not from a copy of the plugin that was turned off (an update or a reload):
+		// a reminder would show twice.
+		if (!this._loaded || !this.settings.reminders) return;
 		const now = obsidian.moment();
 		const fired = this.settings.firedReminders;
 		const due = [];
