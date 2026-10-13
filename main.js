@@ -66,6 +66,8 @@ const CREATED_PROPERTY = "keep_created"; // when the note was created in Keep (i
 const TITLE_PROPERTY = "keep_title"; // the Keep title, when the file name can't hold it (e.g. "Sept/Oct 2026")
 const ARCHIVE_TAG = "archived";
 const BOARD_VIEW = "keep-board"; // the board's view type in .base files
+// Settings that belong to one device rather than the vault (kept out of the synced data.json).
+const DEVICE_SETTINGS = ["shortcutReminders"];
 const LABELS_VIEW = "full-keep-mode-labels";
 const COLORS = [
 	{ id: null, name: "Default" },
@@ -914,7 +916,7 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
 		toggle("Archive button", `A button in each note's top bar that archives the note (property "${ARCHIVE_PROPERTY}"), with Undo. The board hides archived notes; they are in its Archive view.`, "archiveButton");
 		toggle("Reminders", `A bell in each note's top bar to set a reminder (property "${REMINDER_PROPERTY}"). When it is due, a notice pops up while Obsidian is open; reminders missed while it was closed are shown when it opens.`, "reminders");
-		toggle("Reminders via Apple Shortcuts", "iPhone, iPad and Mac: also hand each new reminder to a shortcut, which puts it in the Reminders app, so you're notified even when Obsidian is closed. Set up the shortcut once; see \"Reminders on your iPhone\" in the plugin's README.", "shortcutReminders");
+		toggle("Reminders via Apple Shortcuts", "iPhone, iPad and Mac: also hand each new reminder to a shortcut, which puts it in the Reminders app, so you're notified even when Obsidian is closed. Set up the shortcut once; see \"Reminders on your iPhone\" in the plugin's README. (A setting of this device only.)", "shortcutReminders");
 		new obsidian.Setting(containerEl)
 			.setName("Shortcut name")
 			.setDesc("The name of that shortcut in the Shortcuts app.")
@@ -1135,10 +1137,27 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const data = await this.loadData();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 		this.settings.firedReminders = Object.assign({}, data?.firedReminders);
+		delete this.settings.calendarReminders; // from 2.2.0, no longer used
+		// Settings that belong to one device (they'd travel to the others with the
+		// synced data.json and switch them there too).
+		for (const key of DEVICE_SETTINGS) {
+			const local = this.app.loadLocalStorage?.(`full-keep-mode-${key}`);
+			this.settings[key] = local === null || local === undefined ? DEFAULT_SETTINGS[key] : local === "true";
+		}
+	}
+
+	// The settings shared by all devices (data.json, synced); device settings stay local.
+	async saveSharedSettings() {
+		const shared = { ...this.settings };
+		for (const key of DEVICE_SETTINGS) {
+			delete shared[key];
+			this.app.saveLocalStorage?.(`full-keep-mode-${key}`, String(this.settings[key]));
+		}
+		await this.saveData(shared);
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		await this.saveSharedSettings();
 		this.applyBodyClasses();
 		this.renderButtons();
 		this.refreshEditors();
@@ -1550,7 +1569,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		});
 		// A changed reminder may fire again.
 		delete this.settings.firedReminders[file.path];
-		await this.saveData(this.settings);
+		await this.saveSharedSettings();
 	}
 
 	// Also hand the reminder to an Apple Shortcut (iPhone, iPad, Mac), which can put it
@@ -1587,7 +1606,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			due.push({ file, time });
 		}
 		if (!due.length) return;
-		await this.saveData(this.settings);
+		await this.saveSharedSettings();
 		for (const { file, time } of due) this.showReminder(file, time, atStart || now.diff(time, "minutes") > 2);
 	}
 
