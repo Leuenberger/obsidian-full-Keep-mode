@@ -43,8 +43,6 @@ const DEFAULT_SETTINGS = {
 	colorButton: true,
 	archiveButton: true,
 	reminders: true,
-	shortcutReminders: false, // also hand each reminder to an Apple Shortcut (e.g. into the Reminders app)
-	shortcutName: "Keep reminder",
 	takeANote: true,
 	boardAsHome: true, // open the board at start (and, on phones, in empty tabs), like Keep
 	searchBar: true, // always-visible search bar on the board
@@ -67,7 +65,7 @@ const TITLE_PROPERTY = "keep_title"; // the Keep title, when the file name can't
 const ARCHIVE_TAG = "archived";
 const BOARD_VIEW = "keep-board"; // the board's view type in .base files
 // Settings that belong to one device rather than the vault (kept out of the synced data.json).
-const DEVICE_SETTINGS = ["shortcutReminders"];
+const DEVICE_SETTINGS = [];
 const LABELS_VIEW = "full-keep-mode-labels";
 const COLORS = [
 	{ id: null, name: "Default" },
@@ -916,14 +914,6 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
 		toggle("Archive button", `A button in each note's top bar that archives the note (property "${ARCHIVE_PROPERTY}"), with Undo. The board hides archived notes; they are in its Archive view.`, "archiveButton");
 		toggle("Reminders", `A bell in each note's top bar to set a reminder (property "${REMINDER_PROPERTY}"). When it is due, a notice pops up while Obsidian is open; reminders missed while it was closed are shown when it opens.`, "reminders");
-		toggle("Reminders via Apple Shortcuts", "iPhone, iPad and Mac: also hand each new reminder to a shortcut, which puts it in the Reminders app, so you're notified even when Obsidian is closed. Set up the shortcut once; see \"Reminders on your iPhone\" in the plugin's README. (A setting of this device only.)", "shortcutReminders");
-		new obsidian.Setting(containerEl)
-			.setName("Shortcut name")
-			.setDesc("The name of that shortcut in the Shortcuts app.")
-			.addText(t => t.setValue(this.plugin.settings.shortcutName).onChange(async value => {
-				this.plugin.settings.shortcutName = value.trim() || "Keep reminder";
-				await this.plugin.saveSettings();
-			}));
 		toggle("Board as home screen", "Open the board when Obsidian starts, like Keep. On phones, an empty tab shows the board too.", "boardAsHome");
 		toggle("Search bar", "Always shown at the top of the board, like Keep's. Finds notes by title, label and text.", "searchBar");
 		toggle("Labels side menu", "Notes, Reminders, your labels and Archive in the left sidebar, like Keep's menu. Click one to show it on the board.", "labelsSidebar");
@@ -1140,7 +1130,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const data = await this.loadData();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 		this.settings.firedReminders = Object.assign({}, data?.firedReminders);
-		delete this.settings.calendarReminders; // from 2.2.0, no longer used
+		// No longer used (2.2.0-2.4.4: calendar and Apple Shortcuts reminders).
+		for (const key of ["calendarReminders", "shortcutReminders", "shortcutName"]) delete this.settings[key];
 		// Settings that belong to one device (they'd travel to the others with the
 		// synced data.json and switch them there too).
 		for (const key of DEVICE_SETTINGS) {
@@ -1573,25 +1564,6 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		// A changed reminder may fire again.
 		delete this.settings.firedReminders[file.path];
 		await this.saveSharedSettings();
-	}
-
-	// Also hand the reminder to an Apple Shortcut (iPhone, iPad, Mac), which can put it
-	// in the Reminders app: that notifies at the time even while Obsidian is closed
-	// (plugins can't schedule notifications themselves). The shortcut gets three
-	// lines: the time ("2026-10-14 08:00"), the note's title and a link to the note,
-	// and afterwards returns to the note.
-	// Apple's documented form (shortcuts://run-shortcut?name=…&input=text&text=…); the
-	// clipboard is never touched. The shortcut's last action opens the link (third line)
-	// to come back to the note.
-	sendToShortcut(file, time) {
-		const title = this.titleOf(file) || file.basename;
-		const link = `obsidian://open?vault=${encodeURIComponent(this.app.vault.getName())}&file=${encodeURIComponent(file.path)}`;
-		const input = [time.format("YYYY-MM-DD HH:mm"), title, link].join("\n");
-		const url = "shortcuts://run-shortcut"
-			+ `?name=${encodeURIComponent(this.settings.shortcutName || "Keep reminder")}`
-			+ `&input=text&text=${encodeURIComponent(input)}`;
-		window.open(url);
-		return url;
 	}
 
 	// Show every reminder that is due and hasn't been shown yet. Called every
@@ -2896,7 +2868,6 @@ class ReminderModal extends obsidian.Modal {
 			await plugin.setReminder(file, time);
 			this.close();
 			new obsidian.Notice(time ? `Reminder set: ${time.format("ddd D MMM, HH:mm")}` : "Reminder removed");
-			if (time && plugin.settings.shortcutReminders) plugin.sendToShortcut(file, time);
 		};
 
 		const later = now.clone().hour(20).minute(0).second(0); // Keep: 8 PM
