@@ -49,7 +49,12 @@ const DEFAULT_SETTINGS = {
 	labelsSidebar: true, // Keep's side menu: Notes, Reminders, labels, Archive
 	dragCards: true,
 	firedReminders: {}, // path -> reminder time already shown (so each one fires once)
+	firstUsed: 0, // when the plugin was first used, for asking once for a star on GitHub
+	starAsked: false,
 };
+
+const REPO_URL = "https://github.com/Leuenberger/obsidian-full-Keep-mode";
+const STAR_ASK_AFTER = 14 * 24 * 60 * 60 * 1000; // two weeks of use
 
 // A note can opt out of the checklist features with this property set to false.
 const OPT_OUT_PROPERTY = "full-keep-mode";
@@ -1019,6 +1024,11 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 				await this.plugin.saveSettings();
 			}));
 
+		new obsidian.Setting(containerEl)
+			.setName("Like Full Keep Mode?")
+			.setDesc("A star on GitHub helps other Keep users find it.")
+			.addButton(b => b.setButtonText("Star on GitHub").onClick(() => window.open(REPO_URL)));
+
 		containerEl.createEl("h3", { text: "Notes and board" });
 		new obsidian.Setting(containerEl)
 			.setName("Keep board")
@@ -1201,6 +1211,13 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			if (!this._loaded) return; // turned off (reloaded or updated) in the meantime
 			void this.checkReminders(true);
 			this.registerInterval(window.setInterval(() => void this.checkReminders(), 20000));
+		});
+
+		// Once, after two weeks of use (a minute after start): ask for a star on GitHub.
+		this.app.workspace.onLayoutReady(() => {
+			if (!this._loaded) return;
+			const timer = window.setTimeout(() => void this.maybeAskForStar(), 60000);
+			this.register(() => window.clearTimeout(timer));
 		});
 
 		// The board: a view type for .base files (Obsidian 1.10 and later).
@@ -1711,6 +1728,38 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		if (!due.length) return;
 		await this.saveSharedSettings();
 		for (const { file, time } of due) this.showReminder(file, time, atStart || now.diff(time, "minutes") > 2);
+	}
+
+	// Asks once, ever (on all synced devices), and only after two weeks of use.
+	async maybeAskForStar(now = Date.now()) {
+		const s = this.settings;
+		if (s.starAsked || this.importing) return false;
+		if (!s.firstUsed) {
+			s.firstUsed = now;
+			await this.saveSharedSettings();
+			return false;
+		}
+		if (now - s.firstUsed < STAR_ASK_AFTER) return false;
+		s.starAsked = true;
+		await this.saveSharedSettings();
+		let notice = null;
+		const fragment = createFragment(f => {
+			f.appendText("Enjoying Full Keep Mode? A star on GitHub helps other Keep users find it. ");
+			const star = f.createEl("a", { text: "Star on GitHub", href: REPO_URL, cls: "fkm-star-link" });
+			star.addEventListener("click", event => {
+				event.preventDefault();
+				window.open(REPO_URL);
+				notice?.hide();
+			});
+			f.appendText(" · ");
+			const no = f.createEl("a", { text: "No thanks", href: "#", cls: "fkm-star-no" });
+			no.addEventListener("click", event => {
+				event.preventDefault();
+				notice?.hide();
+			});
+		});
+		notice = new obsidian.Notice(fragment, 0); // until clicked away
+		return true;
 	}
 
 	showReminder(file, time, missed) {

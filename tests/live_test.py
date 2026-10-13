@@ -536,6 +536,26 @@ def main():
         pasted = paste_into("paste two", "- [ ] A\n- [ ] \n- [ ] B\n", 2, "\t- [ ] X\n\t\tsecond\n\t\tthird")
         check("…and a copied item with its lines lands at this level", pasted == "- [ ] A\n- [ ] X\n\tsecond\n\tthird\n- [ ] B\n", repr(pasted))
 
+        # Asking for a GitHub star: once, after two weeks of use, and never again.
+        star = ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
+            const saved = { firstUsed: p.settings.firstUsed, starAsked: p.settings.starAsked };
+            const notices = () => [...document.querySelectorAll('.notice')].filter(n => n.textContent.includes('Star on GitHub'));
+            notices().forEach(n => n.remove());
+            const day = 24 * 60 * 60 * 1000, now = Date.now();
+            Object.assign(p.settings, { firstUsed: 0, starAsked: false });
+            const first = await p.maybeAskForStar(now);
+            const started = p.settings.firstUsed === now;
+            const early = await p.maybeAskForStar(now + 13 * day);
+            const asked = await p.maybeAskForStar(now + 15 * day);
+            const shown = notices().length;
+            notices()[0]?.querySelector('.fkm-star-no')?.click(); await wait(500);
+            const gone = notices().length === 0;
+            const again = await p.maybeAskForStar(now + 30 * day);
+            Object.assign(p.settings, saved); await p.saveSharedSettings();
+            return { first, started, early, asked, shown, gone, again };""")
+        check("asks once for a GitHub star, after two weeks of use; \"No thanks\" closes it for good",
+              star == {"first": False, "started": True, "early": False, "asked": True, "shown": 1, "gone": True, "again": False}, star)
+
         print("Settings and opt-out")
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})
         click_checkbox("A")
