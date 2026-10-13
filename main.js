@@ -50,11 +50,14 @@ const DEFAULT_SETTINGS = {
 	dragCards: true,
 	firedReminders: {}, // path -> reminder time already shown (so each one fires once)
 	firstUsed: 0, // when the plugin was first used, for asking once for a star on GitHub
+	importedAt: 0, // when notes were last imported from Keep (the star is asked a week later)
 	starAsked: false,
 };
 
 const REPO_URL = "https://github.com/Leuenberger/obsidian-full-Keep-mode";
-const STAR_ASK_AFTER = 14 * 24 * 60 * 60 * 1000; // two weeks of use
+const DAY = 24 * 60 * 60 * 1000;
+const STAR_ASK_AFTER_IMPORT = 7 * DAY; // a week after importing notes from Keep
+const STAR_ASK_AFTER = 14 * DAY; // or after two weeks of use, without an import
 
 // A note can opt out of the checklist features with this property set to false.
 const OPT_OUT_PROPERTY = "full-keep-mode";
@@ -1025,8 +1028,8 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 			}));
 
 		new obsidian.Setting(containerEl)
-			.setName("Like Full Keep Mode?")
-			.setDesc("A star on GitHub helps other Keep users find it.")
+			.setName("Enjoying Full Keep Mode?")
+			.setDesc("A star on GitHub is a quick way to say thanks, and it keeps me improving the plugin.")
 			.addButton(b => b.setButtonText("Star on GitHub").onClick(() => window.open(REPO_URL)));
 
 		containerEl.createEl("h3", { text: "Notes and board" });
@@ -1213,7 +1216,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			this.registerInterval(window.setInterval(() => void this.checkReminders(), 20000));
 		});
 
-		// Once, after two weeks of use (a minute after start): ask for a star on GitHub.
+		// Once, a week after importing from Keep or after two weeks of use (a minute after
+		// start): ask for a star on GitHub.
 		this.app.workspace.onLayoutReady(() => {
 			if (!this._loaded) return;
 			const timer = window.setTimeout(() => void this.maybeAskForStar(), 60000);
@@ -1730,7 +1734,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		for (const { file, time } of due) this.showReminder(file, time, atStart || now.diff(time, "minutes") > 2);
 	}
 
-	// Asks once, ever (on all synced devices), and only after two weeks of use.
+	// Asks once, ever (on all synced devices): a week after a successful import from
+	// Keep, or after two weeks of use without one.
 	async maybeAskForStar(now = Date.now()) {
 		const s = this.settings;
 		if (s.starAsked || this.importing) return false;
@@ -1739,12 +1744,13 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			await this.saveSharedSettings();
 			return false;
 		}
-		if (now - s.firstUsed < STAR_ASK_AFTER) return false;
+		const due = s.importedAt ? s.importedAt + STAR_ASK_AFTER_IMPORT : s.firstUsed + STAR_ASK_AFTER;
+		if (now < due) return false;
 		s.starAsked = true;
 		await this.saveSharedSettings();
 		let notice = null;
 		const fragment = createFragment(f => {
-			f.appendText("Enjoying Full Keep Mode? A star on GitHub helps other Keep users find it. ");
+			f.appendText("Hi, Gabriel here, the maker of Full Keep Mode. If it made your move from Keep easier, a star on GitHub is a quick way to say thanks, and it keeps me improving the plugin. ");
 			const star = f.createEl("a", { text: "Star on GitHub", href: REPO_URL, cls: "fkm-star-link" });
 			star.addEventListener("click", event => {
 				event.preventDefault();
@@ -2681,7 +2687,12 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	async importKeep(source, folderName, report = () => {}) {
 		this.importing = true;
 		try {
-			return await this.importKeepNotes(source, folderName, report);
+			const result = await this.importKeepNotes(source, folderName, report);
+			if (result.imported > 0) {
+				this.settings.importedAt = Date.now();
+				await this.saveSharedSettings();
+			}
+			return result;
 		} finally {
 			this.importing = false;
 			if (this.boardsWaiting) {

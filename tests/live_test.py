@@ -497,6 +497,7 @@ def main():
         imported = ob.js(PRELUDE + f"""
             const p = app.plugins.plugins['full-keep-mode'];
             const json = {json.dumps(json.dumps(export))};
+            const importedBefore = p.settings.importedAt;
             const r = await p.importKeep({{ files: [{{ path: 'keep-export/notes.json', name: 'notes.json', text: async () => json, bytes: async () => new ArrayBuffer(0) }}] }}, FOLDER + '/import');
             await wait(1500);
             const read = n => app.vault.read(app.vault.getAbstractFileByPath(FOLDER + '/import/' + n + '.md'));
@@ -504,9 +505,11 @@ def main():
             return {{ r, packing: await read('Packing'), links: await read('Links'), milk: await read('Buy milk'),
                       packingFm: fm('Packing'), linksFm: fm('Links'),
                       packingMtime: app.vault.getAbstractFileByPath(FOLDER + '/import/Packing.md').stat.mtime,
+                      importedAt: await (async () => {{ const t = p.settings.importedAt; p.settings.importedAt = importedBefore; await p.saveSharedSettings(); return t; }})(),
                       milkTitle: p.titleOf(app.vault.getAbstractFileByPath(FOLDER + '/import/Buy milk.md')) }};""")
         r = imported["r"]
         check("all notes come in (Keep's trash is left out)", r["imported"] == 3 and r["skipped"] == 1, r)
+        check("…and the import time is kept (for asking for a star a week later)", abs(imported["importedAt"] - time.time() * 1000) < 120000, imported["importedAt"])
         packing = imported["packing"].split("---\n")[-1]
         check("checklists keep their order, sub-items and ticks (two levels, like Keep)",
               packing == "- [ ] Parent\n\t- [ ] Child 1\n\t- [ ] Grandchild\n\t- [x] Child 2\n- [ ] Two lines\n\tsecond line\n- [x] Done\n", repr(packing))
@@ -536,13 +539,13 @@ def main():
         pasted = paste_into("paste two", "- [ ] A\n- [ ] \n- [ ] B\n", 2, "\t- [ ] X\n\t\tsecond\n\t\tthird")
         check("…and a copied item with its lines lands at this level", pasted == "- [ ] A\n- [ ] X\n\tsecond\n\tthird\n- [ ] B\n", repr(pasted))
 
-        # Asking for a GitHub star: once, after two weeks of use, and never again.
+        # Asking for a GitHub star: once, a week after an import or after two weeks of use.
         star = ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
-            const saved = { firstUsed: p.settings.firstUsed, starAsked: p.settings.starAsked };
+            const saved = { firstUsed: p.settings.firstUsed, importedAt: p.settings.importedAt, starAsked: p.settings.starAsked };
             const notices = () => [...document.querySelectorAll('.notice')].filter(n => n.textContent.includes('Star on GitHub'));
             notices().forEach(n => n.remove());
             const day = 24 * 60 * 60 * 1000, now = Date.now();
-            Object.assign(p.settings, { firstUsed: 0, starAsked: false });
+            Object.assign(p.settings, { firstUsed: 0, importedAt: 0, starAsked: false });
             const first = await p.maybeAskForStar(now);
             const started = p.settings.firstUsed === now;
             const early = await p.maybeAskForStar(now + 13 * day);
@@ -551,10 +554,17 @@ def main():
             notices()[0]?.querySelector('.fkm-star-no')?.click(); await wait(500);
             const gone = notices().length === 0;
             const again = await p.maybeAskForStar(now + 30 * day);
+            // With an import: a week after it.
+            Object.assign(p.settings, { firstUsed: now, importedAt: now + day, starAsked: false });
+            const beforeWeek = await p.maybeAskForStar(now + 7 * day);
+            const afterWeek = await p.maybeAskForStar(now + 8.5 * day);
+            notices().forEach(n => n.remove());
             Object.assign(p.settings, saved); await p.saveSharedSettings();
-            return { first, started, early, asked, shown, gone, again };""")
+            return { first, started, early, asked, shown, gone, again, beforeWeek, afterWeek };""")
         check("asks once for a GitHub star, after two weeks of use; \"No thanks\" closes it for good",
-              star == {"first": False, "started": True, "early": False, "asked": True, "shown": 1, "gone": True, "again": False}, star)
+              {k: star[k] for k in ("first", "started", "early", "asked", "shown", "gone", "again")}
+              == {"first": False, "started": True, "early": False, "asked": True, "shown": 1, "gone": True, "again": False}, star)
+        check("…or a week after importing from Keep", (star["beforeWeek"], star["afterWeek"]) == (False, True), star)
 
         print("Settings and opt-out")
         open_note("no sinking", HEAD + "- [ ] A\n- [ ] B", settings={"sinkTicked": False})
