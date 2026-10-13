@@ -1,0 +1,22 @@
+# Pushing a version tag (e.g. 2.5.5, the same as in manifest.json) publishes a
+# GitHub release with the three files Obsidian installs.
+name: Release
+
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match manifest.json
+        run: test "$(jq -r .version manifest.json)" = "$GITHUB_REF_NAME"
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css --title "$GITHUB_REF_NAME" --generate-notes
