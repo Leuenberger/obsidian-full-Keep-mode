@@ -245,7 +245,8 @@ Apple Shortcut put each reminder in the **Reminders** app. Set it up once:
 7. In Obsidian: **Settings → Full Keep Mode → Reminders via Apple Shortcuts**.
 
 From then on, setting a reminder in a note briefly opens Shortcuts, which adds
-it to Reminders and returns to the note. The shortcut gets three lines: the
+it to Reminders and returns to the note. The shortcut gets three lines (via the
+clipboard, which they replace): the
 time (`2026-10-14 08:00`), the note's title, and a link back to the note, which
 you can add to the reminder's URL too. If you change or delete a reminder in
 Obsidian later, change it in Reminders as well.

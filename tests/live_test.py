@@ -648,6 +648,9 @@ def main():
             const realOpen = window.open;
             const wasOn = plugin.settings.shortcutReminders;
             const opened = [];
+            const realWrite = navigator.clipboard.writeText;
+            let copied = null;
+            navigator.clipboard.writeText = async text => { copied = text; };
             window.open = url => { opened.push(url); return null; };
             plugin.settings.shortcutReminders = true;
             try {
@@ -655,15 +658,16 @@ def main():
                 await wait(900);
             } finally {
                 window.open = realOpen;
+                navigator.clipboard.writeText = realWrite;
                 plugin.settings.shortcutReminders = wasOn;
             }
-            return { opened, text: opened.length ? decodeURIComponent(new URL(opened[0]).searchParams.get('text') ?? '') : null };""")
+            return { opened, text: copied };""")
         tomorrow = ob.js("return moment().add(1, 'day').format('YYYY-MM-DD') + 'T08:00';")
         check("\"Tomorrow\" sets the reminder to 8:00 tomorrow", frontmatter("archive").get("keep_reminder") == tomorrow, frontmatter("archive"))
         check("…and the bell shows it", ob.js("return window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').classList.contains('has-reminder');"))
         lines = (opened["text"] or "").split("\n")
         check("…and, with the Shortcuts option, goes to the shortcut: time, title, link to the note",
-              len(opened["opened"]) == 1 and opened["opened"][0].startswith("shortcuts://x-callback-url/run-shortcut?name=Keep%20reminder")
+              len(opened["opened"]) == 1 and opened["opened"][0].startswith("shortcuts://x-callback-url/run-shortcut?name=Keep%20reminder&input=clipboard")
               and lines[0] == tomorrow.replace("T", " ") and lines[1] == "archive" and lines[2].startswith("obsidian://open?vault="), opened)
 
         fired = ob.js(PRELUDE + """
