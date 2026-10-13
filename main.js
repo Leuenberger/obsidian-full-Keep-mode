@@ -943,7 +943,63 @@ function checklistExtension(plugin) {
 		},
 	});
 
-	return [decorations, keepCursorOut, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons];
+	// Phones: swipe an item sideways, anywhere on it, to indent or outdent it, like
+	// Keep. Not after a long press (that selects text), and not up or down (scrolling).
+	const swipeIndent = ViewPlugin.fromClass(class {
+		constructor(view) {
+			this.dom = view.contentDOM;
+			this.start = null;
+			if (!obsidian.Platform.isMobile) return;
+			const stop = event => {
+				if (event.cancelable) event.preventDefault();
+				event.stopPropagation(); // nor does Obsidian open its sidebar
+			};
+			this.onStart = event => {
+				this.start = null;
+				if (event.touches.length !== 1 || !livePreview(view.state) || !enabledFor(view.state)) return;
+				const line = event.target.closest?.(".cm-line.fkm-task, .cm-line.fkm-extra");
+				if (!line || event.target.closest(".fkm-grip, input, a")) return;
+				const touch = event.touches[0];
+				this.start = { x: touch.clientX, y: touch.clientY, time: Date.now(), lineNo: view.state.doc.lineAt(view.posAtDOM(line)).number, sideways: false, done: false };
+			};
+			this.onMove = event => {
+				const start = this.start;
+				if (!start) return;
+				const touch = event.touches[0];
+				const dx = touch.clientX - start.x;
+				const dy = touch.clientY - start.y;
+				if (!start.sideways) {
+					if (Math.hypot(dx, dy) < 10) return;
+					if (Date.now() - start.time > 450 || Math.abs(dy) > Math.abs(dx)) {
+						this.start = null; // a selection or a scroll
+						return;
+					}
+					start.sideways = true;
+				}
+				stop(event);
+				if (start.done || Math.abs(dx) < 36) return;
+				start.done = true;
+				plugin.shiftItem(view, start.lineNo, dx > 0 ? 1 : -1);
+			};
+			this.onEnd = event => {
+				if (this.start?.sideways) stop(event); // no tap: no keyboard
+				this.start = null;
+			};
+			this.dom.addEventListener("touchstart", this.onStart, { passive: true });
+			this.dom.addEventListener("touchmove", this.onMove, { passive: false });
+			this.dom.addEventListener("touchend", this.onEnd, { passive: false });
+			this.dom.addEventListener("touchcancel", this.onEnd, { passive: false });
+		}
+		destroy() {
+			if (!this.onStart) return;
+			this.dom.removeEventListener("touchstart", this.onStart);
+			this.dom.removeEventListener("touchmove", this.onMove);
+			this.dom.removeEventListener("touchend", this.onEnd);
+			this.dom.removeEventListener("touchcancel", this.onEnd);
+		}
+	});
+
+	return [decorations, keepCursorOut, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent];
 }
 
 // ----- settings tab -------------------------------------------------------------------------
@@ -1833,23 +1889,49 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			const now = view.state.doc;
 			if (block.toLine > now.lines) return;
 			if (now.sliceString(now.line(block.fromLine).from, now.line(block.toLine).to) !== original) return;
-			const moved = items.slice(index, unitEnd).map(item => ({ ...item }));
-			const shiftBy = drop.depth - moved[0].depth;
-			const cap = this.depthCap(base);
-			// The item gets the new level; its sub-items stay below it, but never deeper
-			// than allowed (with two levels they all become sub-items of the same item).
-			moved.forEach((item, i) => {
-				item.depth = i === 0 ? drop.depth : Math.min(Math.max(item.depth + shiftBy, drop.depth + 1), cap);
-			});
-			const others = rest.map(item => ({ ...item }));
-			const next = [...others.slice(0, drop.landAt), ...moved, ...others.slice(drop.landAt)];
-			writeItems(view, block, this.settings.sinkTicked ? sinkItems(next) : next, unit);
+			this.placeItem(view, block, index, drop.landAt, drop.depth);
 		};
 
 		grip.setPointerCapture(event.pointerId);
 		grip.addEventListener("pointermove", onMove);
 		grip.addEventListener("pointerup", finish);
 		grip.addEventListener("pointercancel", finish);
+	}
+
+	// Put item `index` (with its sub-items) at `landAt` among the other items, at `depth`.
+	placeItem(view, block, index, landAt, depth) {
+		const unit = indentUnit(this.app);
+		const items = block.items;
+		const unitEnd = descendantsEnd(items, index);
+		const base = baseDepth(items);
+		const rest = [...items.slice(0, index), ...items.slice(unitEnd)];
+		const moved = items.slice(index, unitEnd).map(item => ({ ...item }));
+		const shiftBy = depth - moved[0].depth;
+		const cap = this.depthCap(base);
+		// The item gets the new level; its sub-items stay below it, but never deeper
+		// than allowed (with two levels they all become sub-items of the same item).
+		moved.forEach((item, i) => {
+			item.depth = i === 0 ? depth : Math.min(Math.max(item.depth + shiftBy, depth + 1), cap);
+		});
+		const others = rest.map(item => ({ ...item }));
+		const next = [...others.slice(0, landAt), ...moved, ...others.slice(landAt)];
+		writeItems(view, block, this.settings.sinkTicked ? sinkItems(next) : next, unit);
+	}
+
+	// Indent (+1) or outdent (-1) the item on a line in place, like dragging its grip
+	// sideways: Keep's swipe on an item on phones.
+	shiftItem(view, lineNo, delta) {
+		const block = findBlock(view.state.doc, lineNo, indentUnit(this.app));
+		if (!block) return false;
+		const items = block.items;
+		const index = items.findIndex(item => item.line <= lineNo && lineNo <= item.line + item.extra.length);
+		if (index < 0) return false;
+		const base = baseDepth(items);
+		const rest = [...items.slice(0, index), ...items.slice(descendantsEnd(items, index))];
+		const depth = Math.max(base, Math.min(this.maxDepth(base, rest[index - 1]), items[index].depth + delta));
+		if (depth === items[index].depth) return false;
+		this.placeItem(view, block, index, index, depth);
+		return true;
 	}
 
 	// ----- the board ------------------------------------------------------------------------

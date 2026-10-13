@@ -716,7 +716,7 @@ def main():
             check("Edit labels: renaming to a label that exists says so", errors == ["Label already exists"], errors)
             rename_label("fkm-test-fruit", "fkm test fruits")
             tags = [frontmatter(n).get("tags") for n in ("Card A", "Card B", "Card C")]
-            check("Edit labels: renaming changes the label in all its notes", tags == [["fkm-test-fruits"], ["fkm-test-fruits"], ["fkm-test-veg"]], tags)
+            check("Edit labels: renaming changes the label in all its notes", tags == [["Fruit", "fkm-test-fruits"], ["fkm-test-fruits"], ["fkm-test-veg"]], tags)
             time.sleep(0.5)
             chip = ob.js("return window.__fkmBoard.view.containerEl.querySelector('.fkm-search-chip')?.innerText ?? null;")
             check("…and the board showing it follows the new name", chip == "fkm-test-fruits" and sorted(card_order()) == ["Card A", "Card B"], (chip, card_order()))
@@ -727,7 +727,7 @@ def main():
             check("Edit labels: deleting asks first, saying the notes stay", "2 notes" in confirm_text and "won't be deleted" in confirm_text, confirm_text)
             tags = [frontmatter(n).get("tags") for n in ("Card A", "Card B", "Card C")]
             exist = ob.js(PRELUDE + "return ['Card A', 'Card B', 'Card C'].every(n => app.vault.getAbstractFileByPath(FOLDER + '/' + n + '.md'));")
-            check("…then removes the label from its notes, which stay", tags == [None, None, ["fkm-test-veg"]] and exist, (tags, exist))
+            check("…then removes the label from its notes, which stay", tags == [["Fruit"], None, ["fkm-test-veg"]] and exist, (tags, exist))
             rows = ob.js("return [...document.querySelectorAll('.fkm-edit-labels-row input')].map(i => i.value).filter(v => v.startsWith('fkm-test'));")
             check("…and from the list", rows == ["fkm-test-veg"], rows)
             ob.js(PRELUDE + "[...document.querySelectorAll('.fkm-edit-labels-modal button')].find(b => b.textContent === 'Done').click(); await wait(300);")

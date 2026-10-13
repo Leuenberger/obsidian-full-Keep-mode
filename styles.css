@@ -1126,3 +1126,38 @@ body.fkm-keep.is-phone .notice-container {
 	justify-content: flex-end;
 	margin-top: 12px;
 }
+
+/* ===== Keep's greys (from Keep's iPhone app) =====
+   Dark mode is shades of grey, not black: page #202124, cards #2d2e31. */
+.theme-dark .workspace-leaf-content:has(.fkm-board),
+.theme-dark .workspace-leaf-content[data-type="full-keep-mode-labels"],
+.theme-dark .modal.fkm-note-modal:not(.fkm-note-colored),
+.theme-dark .modal.fkm-note-modal:not(.fkm-note-colored) .workspace-leaf-content {
+	--background-primary: #202124;
+	--background-secondary: #202124;
+	background-color: #202124;
+}
+
+.fkm-card:not(.fkm-card-colored) {
+	border-color: #dadce0;
+}
+
+/* Through the variable, so the fade at the bottom of a long card matches too. */
+.theme-dark .fkm-card:not(.fkm-card-colored) {
+	--background-primary: #2d2e31;
+	border-color: #4f5154;
+}
+
+.fkm-search {
+	border-color: transparent;
+	background: #e9eef6;
+}
+
+.theme-dark .fkm-search {
+	background: #282a2c;
+}
+
+.theme-dark .fkm-take-note {
+	--background-primary: #2d2e31;
+	border-color: #4f5154;
+}

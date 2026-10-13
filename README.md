@@ -38,7 +38,7 @@ Obsidian is there whenever you want it.
 | In Google Keep | In Full Keep Mode |
 |---|---|
 | Board of cards, "Pinned" and "Others" | ✓ Keep's cards in columns (two on phones), pinned first |
-| Note colours | ✓ Keep's exact colours, light and dark; cards and open notes (top bar included) take the colour |
+| Note colours | ✓ Keep's exact colours, light and dark (Keep's greys in dark mode, not black); cards and open notes (top bar included) take the colour |
 | Pin | ✓ on the card (hover) and in the note |
 | Labels and the side menu (☰) | ✓ Notes, Reminders, your labels and Archive; label picker on every note; "Edit labels" |
 | Search bar | ✓ always on top; finds titles, labels and text |
@@ -49,7 +49,7 @@ Obsidian is there whenever you want it.
 | Tick items on a card | ✓ |
 | Checklists: ticked items move down, "*N* ticked items" | ✓ |
 | Ticked sub-items under a faded copy of their parent | ✓ |
-| Drag items up/down, sideways to indent; two levels | ✓ Keep's exact rules, including where sub-items go |
+| Drag items up/down, sideways to indent; two levels | ✓ Keep's exact rules, including where sub-items go; on phones, swipe an item sideways to indent it |
 | Show / hide checkboxes | ✓ |
 | Note opens over the board (full screen on phones) | ✓ with Keep's top and bottom bars on phones |
 | Labels and "Edited …" below the note | ✓ |
