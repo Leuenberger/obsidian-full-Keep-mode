@@ -114,8 +114,9 @@ sub-items follow their parent. If you know Keep, you already know how to use it.
   Editing the title renames the note too.
 - **Archive** with "Undo" in the confirmation.
 - **Reminders** pop up as a notice in Obsidian, plus a system notification on a
-  computer. Each new reminder is also offered to your device's calendar (one
-  tap to add it), so you're notified at the time even when Obsidian is closed.
+  computer. Reminders that fell due while Obsidian was closed are shown when you
+  open it. On an iPhone, iPad or Mac they can also go to Apple's Reminders app
+  (see below), which notifies you even when Obsidian is closed.
 - **Show / hide checkboxes** (⋮ menu) turns a note's lines into a checklist and
   back.
 
@@ -220,14 +221,31 @@ Manually: download `main.js`, `manifest.json` and `styles.css` from the
 `<your vault>/.obsidian/plugins/full-keep-mode/`, then enable the plugin under
 **Settings → Community plugins**.
 
-## Good to know
+## Reminders on your iPhone (optional)
 
-Obsidian doesn't let plugins schedule notifications themselves, so a reminder
-reaches you through your calendar: when you set one, your calendar app asks to
-add it, and then notifies you at the time, even with Obsidian closed. If you
-change or remove the reminder later, change it in the calendar too. (You can
-turn this off in the settings; Obsidian then shows reminders while it's open,
-and ones you missed when you open it.)
+Obsidian doesn't let plugins schedule notifications, so on their own, reminders
+show up while Obsidian is open. To be notified even when it's closed, let an
+Apple Shortcut put each reminder in the **Reminders** app. Set it up once:
+
+1. Open the **Shortcuts** app, tap **+**, and name the new shortcut
+   **Keep reminder**.
+2. Add the action **Split Text**, and set it to split **Shortcut Input** by
+   **New Lines**. (If "Shortcut Input" isn't offered, tap the shortcut's name
+   at the top and let it receive **Text**.)
+3. Add **Get Item from List**: the **First Item** of **Split Text**.
+4. Add **Get Dates from Input**, with that **Item from List** as input.
+5. Add another **Get Item from List**: the **Item At Index 2** of
+   **Split Text** (the note's title).
+6. Add **Add New Reminder**: as the reminder, choose that last
+   **Item from List**; open its options, turn on **Remind Me** **At a Time**,
+   and choose **Dates** as the time.
+7. In Obsidian: **Settings → Full Keep Mode → Reminders via Apple Shortcuts**.
+
+From then on, setting a reminder in a note briefly opens Shortcuts, which adds
+it to Reminders and returns to the note. The shortcut gets three lines: the
+time (`2026-10-14 08:00`), the note's title, and a link back to the note, which
+you can add to the reminder's URL too. If you change or delete a reminder in
+Obsidian later, change it in Reminders as well.
 
 ## Development
 

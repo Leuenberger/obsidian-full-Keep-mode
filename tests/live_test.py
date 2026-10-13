@@ -619,27 +619,30 @@ def main():
         ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').click(); await wait(400);")
         picks = ob.js("return [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick span:first-child')].map(s => s.textContent);")
         check("the bell opens Keep's quick picks", "Tomorrow" in picks and "Next week" in picks, picks)
-        # Opening the calendar file is replaced here, so no calendar app opens during the tests.
+        # With "Reminders via Apple Shortcuts" on, the reminder goes to the shortcut. Opening
+        # it is replaced here, so nothing opens during the tests.
         opened = ob.js(PRELUDE + """
-            const realOpen = app.openWithDefaultApp;
+            const plugin = app.plugins.plugins['full-keep-mode'];
+            const realOpen = window.open;
+            const wasOn = plugin.settings.shortcutReminders;
             const opened = [];
-            app.openWithDefaultApp = async path => { opened.push(path); };
+            window.open = url => { opened.push(url); return null; };
+            plugin.settings.shortcutReminders = true;
             try {
                 [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick')].find(b => b.textContent.startsWith('Tomorrow')).click();
                 await wait(900);
             } finally {
-                app.openWithDefaultApp = realOpen;
+                window.open = realOpen;
+                plugin.settings.shortcutReminders = wasOn;
             }
-            const ics = opened.length ? await app.vault.adapter.read(opened[0]) : null;
-            return { opened, ics };""")
+            return { opened, text: opened.length ? decodeURIComponent(new URL(opened[0]).searchParams.get('text') ?? '') : null };""")
         tomorrow = ob.js("return moment().add(1, 'day').format('YYYY-MM-DD') + 'T08:00';")
         check("\"Tomorrow\" sets the reminder to 8:00 tomorrow", frontmatter("archive").get("keep_reminder") == tomorrow, frontmatter("archive"))
         check("…and the bell shows it", ob.js("return window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').classList.contains('has-reminder');"))
-        ics = opened["ics"] or ""
-        start = tomorrow.replace("-", "").replace(":", "") + "00"
-        check("…and it goes to the calendar, with an alert at that time",
-              len(opened["opened"]) == 1 and f"DTSTART:{start}" in ics and "BEGIN:VALARM" in ics and "TRIGGER:PT0M" in ics
-              and "obsidian://open?vault=" in ics, opened)
+        lines = (opened["text"] or "").split("\n")
+        check("…and, with the Shortcuts option, goes to the shortcut: time, title, link to the note",
+              len(opened["opened"]) == 1 and opened["opened"][0].startswith("shortcuts://x-callback-url/run-shortcut?name=Keep%20reminder")
+              and lines[0] == tomorrow.replace("T", " ") and lines[1] == "archive" and lines[2].startswith("obsidian://open?vault="), opened)
 
         fired = ob.js(PRELUDE + """
             const plugin = app.plugins.plugins["full-keep-mode"];

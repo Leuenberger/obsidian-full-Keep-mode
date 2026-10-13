@@ -43,7 +43,8 @@ const DEFAULT_SETTINGS = {
 	colorButton: true,
 	archiveButton: true,
 	reminders: true,
-	calendarReminders: true, // also put each reminder in the device's calendar (notifies when Obsidian is closed)
+	shortcutReminders: false, // also hand each reminder to an Apple Shortcut (e.g. into the Reminders app)
+	shortcutName: "Keep reminder",
 	takeANote: true,
 	searchBar: true, // always-visible search bar on the board
 	labelsSidebar: true, // Keep's side menu: Notes, Reminders, labels, Archive
@@ -879,7 +880,14 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 		toggle("Colour button", "A palette in each note's top bar to give the note a colour.", "colorButton");
 		toggle("Archive button", `A button in each note's top bar that archives the note (property "${ARCHIVE_PROPERTY}"), with Undo. The board hides archived notes; they are in its Archive view.`, "archiveButton");
 		toggle("Reminders", `A bell in each note's top bar to set a reminder (property "${REMINDER_PROPERTY}"). When it is due, a notice pops up while Obsidian is open; reminders missed while it was closed are shown when it opens.`, "reminders");
-		toggle("Reminders in your calendar", "Also add each new reminder to your device's calendar (it asks you to confirm), so you get a notification even when Obsidian is closed.", "calendarReminders");
+		toggle("Reminders via Apple Shortcuts", "iPhone, iPad and Mac: also hand each new reminder to a shortcut, which puts it in the Reminders app, so you're notified even when Obsidian is closed. Set up the shortcut once; see \"Reminders on your iPhone\" in the plugin's README.", "shortcutReminders");
+		new obsidian.Setting(containerEl)
+			.setName("Shortcut name")
+			.setDesc("The name of that shortcut in the Shortcuts app.")
+			.addText(t => t.setValue(this.plugin.settings.shortcutName).onChange(async value => {
+				this.plugin.settings.shortcutName = value.trim() || "Keep reminder";
+				await this.plugin.saveSettings();
+			}));
 		toggle("Search bar", "Always shown at the top of the board, like Keep's. Finds notes by title, label and text.", "searchBar");
 		toggle("Labels side menu", "Notes, Reminders, your labels and Archive in the left sidebar, like Keep's menu. Click one to show it on the board.", "labelsSidebar");
 		toggle("\"Take a note…\" bar", "On the board: opens a new note in the pop-up. A new note closed without any text is thrown away, like in Keep.", "takeANote");
@@ -1502,45 +1510,21 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		await this.saveData(this.settings);
 	}
 
-	// Also put the reminder in the device's own calendar, so it notifies even while
-	// Obsidian is closed (plugins can't schedule notifications themselves). Writes a
-	// calendar file with an alert and opens it with the system's calendar app, which
-	// asks to add it.
-	async addToCalendar(file, time) {
-		const text = value => String(value).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
-		const local = t => t.format("YYYYMMDD[T]HHmmss"); // floating time: the device's own time zone
+	// Also hand the reminder to an Apple Shortcut (iPhone, iPad, Mac), which can put it
+	// in the Reminders app: that notifies at the time even while Obsidian is closed
+	// (plugins can't schedule notifications themselves). The shortcut gets three
+	// lines: the time ("2026-10-14 08:00"), the note's title and a link to the note,
+	// and afterwards returns to the note.
+	sendToShortcut(file, time) {
 		const title = this.titleOf(file) || file.basename;
 		const link = `obsidian://open?vault=${encodeURIComponent(this.app.vault.getName())}&file=${encodeURIComponent(file.path)}`;
-		const ics = [
-			"BEGIN:VCALENDAR",
-			"VERSION:2.0",
-			"PRODID:-//Full Keep Mode//Reminders//EN",
-			"BEGIN:VEVENT",
-			`UID:${time.format("YYYYMMDDHHmm")}-${Math.abs([...file.path].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7))}@full-keep-mode`,
-			`DTSTAMP:${obsidian.moment.utc().format("YYYYMMDD[T]HHmmss[Z]")}`,
-			`DTSTART:${local(time)}`,
-			`DTEND:${local(time.clone().add(15, "minutes"))}`,
-			`SUMMARY:${text(title)}`,
-			`DESCRIPTION:${text(`Reminder from Obsidian: ${link}`)}`,
-			`URL:${link}`,
-			"BEGIN:VALARM",
-			"ACTION:DISPLAY",
-			`DESCRIPTION:${text(title)}`,
-			"TRIGGER:PT0M",
-			"END:VALARM",
-			"END:VEVENT",
-			"END:VCALENDAR",
-			"",
-		].join("\r\n");
-		const path = obsidian.normalizePath(`${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/Reminder.ics`);
-		try {
-			await this.app.vault.adapter.write(path, ics);
-			await this.app.openWithDefaultApp(path);
-		} catch (error) {
-			console.error("[Full Keep Mode] Couldn't add the reminder to the calendar:", error);
-			new obsidian.Notice("Couldn't open the calendar for this reminder.");
-		}
-		return ics;
+		const input = [time.format("YYYY-MM-DD HH:mm"), title, link].join("\n");
+		const url = "shortcuts://x-callback-url/run-shortcut"
+			+ `?name=${encodeURIComponent(this.settings.shortcutName || "Keep reminder")}`
+			+ `&input=text&text=${encodeURIComponent(input)}`
+			+ `&x-success=${encodeURIComponent(link)}`;
+		window.open(url);
+		return url;
 	}
 
 	// Show every reminder that is due and hasn't been shown yet. Called every
@@ -2813,7 +2797,7 @@ class ReminderModal extends obsidian.Modal {
 			await plugin.setReminder(file, time);
 			this.close();
 			new obsidian.Notice(time ? `Reminder set: ${time.format("ddd D MMM, HH:mm")}` : "Reminder removed");
-			if (time && plugin.settings.calendarReminders) await plugin.addToCalendar(file, time);
+			if (time && plugin.settings.shortcutReminders) plugin.sendToShortcut(file, time);
 		};
 
 		const later = now.clone().hour(20).minute(0).second(0); // Keep: 8 PM
