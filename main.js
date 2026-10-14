@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const REPO_URL = "https://github.com/Leuenberger/obsidian-full-Keep-mode";
+const KOFI_URL = "https://ko-fi.com/gabrielleuenberger";
 const DAY = 24 * 60 * 60 * 1000;
 const STAR_ASK_AFTER_IMPORT = 7 * DAY; // a week after importing notes from Keep
 const STAR_ASK_AFTER = 14 * DAY; // or after two weeks of use, without an import
@@ -1029,8 +1030,9 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 
 		new obsidian.Setting(containerEl)
 			.setName("Enjoying Full Keep Mode?")
-			.setDesc("A star on GitHub is a quick way to say thanks, and it keeps me improving the plugin.")
-			.addButton(b => b.setButtonText("Star on GitHub").onClick(() => window.open(REPO_URL)));
+			.setDesc("A star on GitHub or a coffee is a quick way to say thanks, and it keeps me improving the plugin.")
+			.addButton(b => b.setButtonText("Star on GitHub").onClick(() => window.open(REPO_URL)))
+			.addButton(b => b.setButtonText("Buy me a coffee").onClick(() => window.open(KOFI_URL)));
 
 		containerEl.createEl("h3", { text: "Notes and board" });
 		new obsidian.Setting(containerEl)
@@ -1750,14 +1752,18 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		await this.saveSharedSettings();
 		let notice = null;
 		const fragment = createFragment(f => {
-			f.appendText("Hi, Gabriel here, the maker of Full Keep Mode. If it made your move from Keep easier, a star on GitHub is a quick way to say thanks, and it keeps me improving the plugin. ");
-			const star = f.createEl("a", { text: "Star on GitHub", href: REPO_URL, cls: "fkm-star-link" });
-			star.addEventListener("click", event => {
-				event.preventDefault();
-				window.open(REPO_URL);
-				notice?.hide();
-			});
-			f.appendText(" · ");
+			f.appendText("Hi, Gabriel here, the maker of Full Keep Mode. If it made your move from Keep easier, a star on GitHub or a coffee is a quick way to say thanks, and it keeps me improving the plugin. ");
+			const link = (text, url, cls) => {
+				const a = f.createEl("a", { text, href: url, cls });
+				a.addEventListener("click", event => {
+					event.preventDefault();
+					window.open(url);
+					notice?.hide();
+				});
+				f.appendText(" · ");
+			};
+			link("Star on GitHub", REPO_URL, "fkm-star-link");
+			link("Buy me a coffee", KOFI_URL, "fkm-coffee-link");
 			const no = f.createEl("a", { text: "No thanks", href: "#", cls: "fkm-star-no" });
 			no.addEventListener("click", event => {
 				event.preventDefault();

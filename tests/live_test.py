@@ -551,6 +551,7 @@ def main():
             const early = await p.maybeAskForStar(now + 13 * day);
             const asked = await p.maybeAskForStar(now + 15 * day);
             const shown = notices().length;
+            const links = [...(notices()[0]?.querySelectorAll('a') ?? [])].map(l => l.textContent + ' ' + l.getAttribute('href'));
             notices()[0]?.querySelector('.fkm-star-no')?.click(); await wait(500);
             const gone = notices().length === 0;
             const again = await p.maybeAskForStar(now + 30 * day);
@@ -560,10 +561,11 @@ def main():
             const afterWeek = await p.maybeAskForStar(now + 8.5 * day);
             notices().forEach(n => n.remove());
             Object.assign(p.settings, saved); await p.saveSharedSettings();
-            return { first, started, early, asked, shown, gone, again, beforeWeek, afterWeek };""")
+            return { first, started, early, asked, shown, links, gone, again, beforeWeek, afterWeek };""")
         check("asks once for a GitHub star, after two weeks of use; \"No thanks\" closes it for good",
               {k: star[k] for k in ("first", "started", "early", "asked", "shown", "gone", "again")}
               == {"first": False, "started": True, "early": False, "asked": True, "shown": 1, "gone": True, "again": False}, star)
+        check("…with a star and a coffee link", star["links"] == ["Star on GitHub https://github.com/Leuenberger/obsidian-full-Keep-mode", "Buy me a coffee https://ko-fi.com/gabrielleuenberger", "No thanks #"], star["links"])
         check("…or a week after importing from Keep", (star["beforeWeek"], star["afterWeek"]) == (False, True), star)
 
         print("Settings and opt-out")

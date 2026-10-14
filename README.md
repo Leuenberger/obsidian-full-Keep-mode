@@ -190,6 +190,12 @@ python tests/record_demo.py               # re-records docs/demo.gif
 
 </details>
 
+## Support
+
+If Full Keep Mode made your move from Keep easier, you can
+[buy me a coffee on Ko-fi](https://ko-fi.com/gabrielleuenberger) or star this
+repo. Thank you!
+
 ## License
 
 [MIT](LICENSE)
