@@ -1185,3 +1185,29 @@ body.fkm-keep.is-mobile .fkm-note-colored .view-header {
 	user-select: none;
 	-webkit-touch-callout: none;
 }
+
+/* ===== In front of an item's text: indentation, grip, checkbox (one piece, no text) ===== */
+.fkm-prefix {
+	white-space: pre;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+
+.fkm-indent-step {
+	display: inline-block;
+	width: var(--list-indent);
+}
+
+.fkm-step-probe {
+	position: absolute;
+	width: var(--list-indent);
+	height: 0;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.fkm-extra-spacer {
+	-webkit-user-select: none;
+	user-select: none;
+}

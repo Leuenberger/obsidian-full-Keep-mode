@@ -399,47 +399,57 @@ function checklistExtension(plugin) {
 		view.dispatch({ changes: { from: pos, to: pos + 1, insert: " " }, userEvent: "input" });
 	};
 
-	class GripWidget extends WidgetType {
-		eq() {
-			return true;
-		}
-		toDOM(view) {
-			// No aria-label: Obsidian would show it as a tooltip right over the list while dragging.
-			const el = createSpan({ cls: "fkm-grip" });
-			obsidian.setIcon(el, "grip-vertical");
-			el.addEventListener("pointerdown", event => plugin.startItemDrag(view, el, event));
-			// Phones: no tap-to-focus, no click and no scrolling from touching the grip
-			// (focusing the editor made iOS jump to the cursor, often at the top).
-			// Nor does a sideways drag open Obsidian's sidebar (swipe from the left).
-			const stop = event => {
-				if (event.cancelable) event.preventDefault();
-				event.stopPropagation();
-			};
-			el.addEventListener("touchstart", stop, { passive: false });
-			el.addEventListener("touchmove", stop, { passive: false });
-			el.addEventListener("touchend", stop, { passive: false });
-			el.addEventListener("mousedown", stop);
-			el.addEventListener("click", stop);
-			return el;
-		}
-		ignoreEvent() {
-			return true;
-		}
-	}
+	const makeGrip = view => {
+		// No aria-label: Obsidian would show it as a tooltip right over the list while dragging.
+		const el = createSpan({ cls: "fkm-grip" });
+		obsidian.setIcon(el, "grip-vertical");
+		el.addEventListener("pointerdown", event => plugin.startItemDrag(view, el, event));
+		// Phones: no tap-to-focus, no click and no scrolling from touching the grip
+		// (focusing the editor made iOS jump to the cursor, often at the top).
+		// Nor does a sideways drag open Obsidian's sidebar (swipe from the left).
+		const stop = event => {
+			if (event.cancelable) event.preventDefault();
+			event.stopPropagation();
+		};
+		el.addEventListener("touchstart", stop, { passive: false });
+		el.addEventListener("touchmove", stop, { passive: false });
+		el.addEventListener("touchend", stop, { passive: false });
+		el.addEventListener("mousedown", stop);
+		el.addEventListener("click", stop);
+		return el;
+	};
 
-	// The checkbox, drawn by the plugin in place of "- [ ]" and always shown as a
-	// checkbox, like in Keep: Obsidian would show the raw "- [ ]" whenever the
-	// cursor or a selection touches it.
-	class CheckboxWidget extends WidgetType {
-		constructor(mark) {
+	// Ticking from a checkbox anywhere in a line: the mark inside its "- [ ]".
+	const tickAt = (view, el) => {
+		const line = view.state.doc.lineAt(view.posAtDOM(el));
+		const m = TASK_RE.exec(line.text);
+		if (!m) return;
+		const pos = line.from + m[1].length + 3;
+		const restoreScroll = keepScroll(view);
+		view.dispatch({ changes: { from: pos, to: pos + 1, insert: m[3] === " " ? "x" : " " }, userEvent: "input" });
+		restoreScroll();
+	};
+
+	// Everything in front of an item's text - its indentation, grip, checkbox and the
+	// space after it - as one piece that isn't text, like in Keep: the cursor and a
+	// selection can't go into it (also not on phones, whose own selection handles
+	// don't know the plugin's rules), and nothing in it can be selected.
+	class PrefixWidget extends WidgetType {
+		constructor(mark, levels, grip) {
 			super();
 			this.mark = mark;
+			this.levels = levels;
+			this.grip = grip;
 		}
 		eq(other) {
-			return other.mark === this.mark;
+			return other.mark === this.mark && other.levels === this.levels && other.grip === this.grip;
 		}
 		toDOM(view) {
-			const label = createEl("label", { cls: "task-list-label fkm-checkbox" });
+			const el = createSpan({ cls: "fkm-prefix" });
+			el.createSpan({ cls: "fkm-step-probe" }); // one indent step, for measuring
+			for (let k = 0; k < this.levels; k++) el.createSpan({ cls: "fkm-indent-step" });
+			if (this.grip) el.appendChild(makeGrip(view));
+			const label = el.createEl("label", { cls: "task-list-label fkm-checkbox" });
 			const box = label.createEl("input", { cls: "task-list-item-checkbox", type: "checkbox" });
 			box.dataset.task = this.mark;
 			box.checked = this.mark !== " ";
@@ -447,21 +457,31 @@ function checklistExtension(plugin) {
 			label.addEventListener("mousedown", event => event.preventDefault());
 			box.addEventListener("click", event => {
 				event.preventDefault();
-				const pos = view.posAtDOM(label) + 3; // the mark inside "- [ ]"
-				const current = view.state.doc.sliceString(pos, pos + 1);
-				const restoreScroll = keepScroll(view);
-				view.dispatch({ changes: { from: pos, to: pos + 1, insert: current === " " ? "x" : " " }, userEvent: "input" });
-				restoreScroll();
+				tickAt(view, el);
 			});
-			return label;
+			el.createSpan({ cls: "fkm-prefix-space", text: " " });
+			return el;
 		}
 		ignoreEvent() {
 			return true;
 		}
 	}
 
-	// Stands in for the leading whitespace of an item's extra line beyond the
-	// item's own indentation; its width puts the text under the item's text.
+	// Source mode: the raw "- [ ]" stays text, with a grip in front of it.
+	class GripWidget extends WidgetType {
+		eq() {
+			return true;
+		}
+		toDOM(view) {
+			return makeGrip(view);
+		}
+		ignoreEvent() {
+			return true;
+		}
+	}
+
+	// Stands in for the leading whitespace of an item's extra line (Shift+Enter): its
+	// width puts the text under the item's text, and the cursor can't go into it.
 	class SpacerWidget extends WidgetType {
 		constructor(depth) {
 			super();
@@ -474,7 +494,7 @@ function checklistExtension(plugin) {
 			return createSpan({ cls: `fkm-extra-spacer fkm-depth-${this.depth}` });
 		}
 		ignoreEvent() {
-			return false;
+			return true;
 		}
 	}
 
@@ -572,30 +592,27 @@ function checklistExtension(plugin) {
 				const depth = Math.min(item.depth, MAX_STYLED_DEPTH);
 				const head = doc.line(item.line);
 				const boxFrom = head.from + item.indent.length;
-				if (s.dragHandles) {
+				if (live) {
+					const prefixTo = Math.min(boxFrom + 6, head.to); // "- [ ] "
+					decos.push(Decoration.replace({ widget: new PrefixWidget(item.mark, item.depth, s.dragHandles) }).range(head.from, prefixTo));
+				} else if (s.dragHandles) {
 					// After the indentation, so the grip floats right next to the checkbox.
 					decos.push(Decoration.widget({ widget: new GripWidget(), side: -1 }).range(boxFrom));
 				}
-				if (live) decos.push(Decoration.replace({ widget: new CheckboxWidget(item.mark) }).range(boxFrom, boxFrom + 5));
 				if (!s.alignExtraLines) return;
 				// Wrapped lines of the item hang exactly under its text.
 				decos.push(Decoration.line({ class: `fkm-task fkm-depth-${depth}` }).range(head.from));
-				// Extra lines: keep the item's own indentation (and its guide line),
-				// replace the rest of the leading whitespace by a spacer.
+				// Extra lines: their leading whitespace becomes a spacer that puts the
+				// text under the item's text.
 				for (let k = 1; k <= item.extra.length; k++) {
 					const line = doc.line(item.line + k);
 					if (!line.text.length) continue;
 					const lead = line.text.match(/^[ \t]*/)[0];
-					const keep = Math.min(item.indent.length, lead.length);
-					const keepOk = lead.slice(0, keep) === item.indent.slice(0, keep);
-					const from = line.from + (keepOk ? keep : 0);
 					decos.push(Decoration.line({ class: `fkm-extra fkm-depth-${depth}` }).range(line.from));
 					const spacer = new SpacerWidget(depth);
-					if (line.from + lead.length > from) {
-						decos.push(Decoration.replace({ widget: spacer }).range(from, line.from + lead.length));
-					} else {
-						decos.push(Decoration.widget({ widget: spacer, side: 1 }).range(from));
-					}
+					if (!live) continue;
+					if (lead.length) decos.push(Decoration.replace({ widget: spacer }).range(line.from, line.from + lead.length));
+					else decos.push(Decoration.widget({ widget: spacer, side: 1 }).range(line.from));
 				}
 			});
 			const ghostCount = ghosts.reduce((sum, g) => sum + g.children.length, 0);
@@ -641,17 +658,12 @@ function checklistExtension(plugin) {
 	const keepCursorOut = EditorState.transactionFilter.of(tr => {
 		if (!tr.selection || !livePreview(tr.state) || !enabledFor(tr.state)) return tr;
 		const doc = tr.newDoc;
-		const start = bodyStart(doc);
-		const oldHead = tr.startState.selection.main.head;
-		const byKey = !tr.docChanged && tr.isUserEvent("select") && !tr.isUserEvent("select.pointer");
 		let changed = false;
 		const fix = pos => {
 			const line = doc.lineAt(pos);
 			const end = textStart(doc, line);
 			if (end === null || pos >= end) return pos;
 			changed = true;
-			// Left from the start of the text: to the end of the line above.
-			if (byKey && oldHead === end && pos === end - 1 && line.from > start) return line.from - 1;
 			return end;
 		};
 		// Only a plain cursor: a selection may start at a line's start (the checkbox stays drawn anyway).
@@ -670,6 +682,19 @@ function checklistExtension(plugin) {
 	//  - Delete at the end of a line joins the next item's text (or line) to it.
 	//  - Ctrl/Cmd+A selects the note's text, not its properties.
 	const keepKeys = Prec.highest(keymap.of([
+		{
+			// Left at the start of an item's text: to the end of the line above.
+			key: "ArrowLeft",
+			run: view => {
+				const { state } = view;
+				const sel = state.selection.main;
+				if (state.selection.ranges.length > 1 || !sel.empty || !livePreview(state) || !enabledFor(state)) return false;
+				const line = state.doc.lineAt(sel.head);
+				if (textStart(state.doc, line) !== sel.head || line.from <= bodyStart(state.doc)) return false;
+				view.dispatch({ selection: { anchor: line.from - 1 }, userEvent: "select", scrollIntoView: true });
+				return true;
+			},
+		},
 		{
 			key: "Backspace",
 			run: view => {
@@ -750,9 +775,9 @@ function checklistExtension(plugin) {
 		},
 	]));
 
-	// Phones: a selection stays within one item's text, like in Keep, where every item
-	// is a text of its own: never the checkboxes or grips, never into the next item.
-	// "Select All" in an item selects its text (a second time: everything).
+	// Phones: "Select All" in an item selects its text, like in Keep, where every item
+	// is a text of its own (a second time: everything). Selections being made are left
+	// alone: correcting them would break off the phone's own selecting.
 	const itemOf = (doc, pos) => {
 		const lineNo = doc.lineAt(pos).number;
 		const block = findBlock(doc, lineNo, indentUnit(app));
@@ -775,14 +800,7 @@ function checklistExtension(plugin) {
 			if (!item || (before.from === item.from && before.to === item.to)) return tr;
 			return [tr, { selection: EditorSelection.range(item.from, item.to), sequential: true }];
 		}
-		// Otherwise: within the item where the selection starts.
-		const item = itemOf(doc, sel.anchor);
-		if (!item) return tr;
-		const clamp = pos => Math.max(item.from, Math.min(item.to, pos));
-		const anchor = clamp(sel.anchor);
-		const head = clamp(sel.head);
-		if (anchor === sel.anchor && head === sel.head) return tr;
-		return [tr, { selection: EditorSelection.range(anchor, head), sequential: true }];
+		return tr;
 	});
 
 	// Ticking or unticking an item (same line, only the tick changed): tick its
@@ -915,8 +933,9 @@ function checklistExtension(plugin) {
 			const line = grip?.closest(".cm-line");
 			const box = line?.querySelector(".task-list-item-checkbox");
 			if (grip && box) {
-				const indent = v.contentDOM.querySelector(".cm-line.fkm-task .cm-hmd-list-indent .cm-indent");
-				const step = indent?.getBoundingClientRect().width || parseFloat(getComputedStyle(line).fontSize) * STEP_EM;
+				const probe = line.querySelector(".fkm-step-probe")
+					?? v.contentDOM.querySelector(".cm-line.fkm-task .cm-hmd-list-indent .cm-indent"); // Source mode
+				const step = probe?.getBoundingClientRect().width || parseFloat(getComputedStyle(line).fontSize) * STEP_EM;
 				gripWidth = Math.round(step - 4);
 				const current = parseFloat(v.dom.style.getPropertyValue("--fkm-grip-shift")) || 0;
 				const natural = grip.getBoundingClientRect().left - current;
@@ -1062,6 +1081,10 @@ function checklistExtension(plugin) {
 				const touch = event.touches[0];
 				const dx = touch.clientX - start.x;
 				const dy = touch.clientY - start.y;
+				if (!start.done && (!view.state.selection.main.empty || !(window.getSelection()?.isCollapsed ?? true))) {
+					this.start = null; // selecting text after all
+					return;
+				}
 				if (!start.sideways) {
 					if (Math.hypot(dx, dy) < 10) return;
 					if (Date.now() - start.time > 450 || Math.abs(dy) > Math.abs(dx)) {
