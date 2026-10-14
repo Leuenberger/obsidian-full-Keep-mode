@@ -313,6 +313,52 @@ function keepScroll(view) {
 	};
 }
 
+// The element that scrolls `el` (the note in a tab or pop-up, or the board).
+function scrollParent(el) {
+	for (; el; el = el.parentElement) {
+		const overflow = getComputedStyle(el).overflowY;
+		if ((overflow === "auto" || overflow === "scroll") && el.scrollHeight > el.clientHeight) return el;
+	}
+	return null;
+}
+
+// While dragging, like Keep: near the top or bottom edge of the scrolling area it
+// scrolls, faster the closer to the edge, also while the pointer rests there.
+// `onScroll` runs after each step (to update the drop place).
+function edgeAutoScroll(scroller, onScroll) {
+	const EDGE = 60;
+	const MAX_STEP = 18;
+	let y = null;
+	let frame = 0;
+	const tick = () => {
+		frame = 0;
+		if (y === null || !scroller) return;
+		const box = scroller.getBoundingClientRect();
+		const top = Math.max(box.top, 0);
+		const bottom = Math.min(box.bottom, window.innerHeight);
+		let step = 0;
+		if (y < top + EDGE) step = -Math.min(MAX_STEP, Math.ceil(((top + EDGE - y) / EDGE) * MAX_STEP));
+		else if (y > bottom - EDGE) step = Math.min(MAX_STEP, Math.ceil(((y - bottom + EDGE) / EDGE) * MAX_STEP));
+		if (!step) return;
+		const before = scroller.scrollTop;
+		scroller.scrollTop += step;
+		if (scroller.scrollTop === before) return; // at the top or bottom
+		onScroll?.();
+		frame = requestAnimationFrame(tick);
+	};
+	return {
+		update(py) {
+			y = py;
+			if (!frame) frame = requestAnimationFrame(tick);
+		},
+		stop() {
+			y = null;
+			if (frame) cancelAnimationFrame(frame);
+			frame = 0;
+		},
+	};
+}
+
 // Where the note's text starts: after the properties (front matter), if any.
 function bodyStart(doc) {
 	if (doc.lines < 2 || doc.line(1).text !== "---") return 0;
@@ -1887,7 +1933,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const original = doc.sliceString(doc.line(block.fromLine).from, doc.line(block.toLine).to);
 		const startX = event.clientX;
 		const hadFocus = view.hasFocus;
-		const restoreScroll = keepScroll(view); // where the note was when the drag started
+		let restoreScroll = keepScroll(view); // where the note was when the drag started
 		const indicator = document.body.createDiv({ cls: "fkm-drop-indicator" });
 		grip.closest(".cm-line")?.addClass("fkm-item-dragging");
 		let drop = null;
@@ -1898,8 +1944,17 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			return i;
 		};
 
-		const onMove = e => {
+		let lastPointer = null;
+		const autoScroll = edgeAutoScroll(scrollParent(view.scrollDOM), () => {
+			if (lastPointer) onMove({ clientX: lastPointer.x, clientY: lastPointer.y, preventDefault() {} }, true);
+		});
+		let scrolled = false;
+
+		const onMove = (e, fromScroll = false) => {
 			e.preventDefault();
+			lastPointer = { x: e.clientX, y: e.clientY };
+			if (fromScroll) scrolled = true;
+			else autoScroll.update(e.clientY);
 			const state = view.state;
 			const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
 			const n = Math.max(block.fromLine, Math.min(block.toLine, state.doc.lineAt(pos).number));
@@ -1934,9 +1989,12 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		};
 
 		const finish = e => {
-			grip.removeEventListener("pointermove", onMove);
-			grip.removeEventListener("pointerup", finish);
-			grip.removeEventListener("pointercancel", finish);
+			autoScroll.stop();
+			// Scrolled while dragging: the note stays where the item was dropped.
+			if (scrolled) restoreScroll = keepScroll(view);
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", finish);
+			window.removeEventListener("pointercancel", finish);
 			indicator.remove();
 			view.dom.querySelectorAll(".fkm-item-dragging").forEach(el => el.removeClass("fkm-item-dragging"));
 			// Phones: keep the keyboard closed and the note where it was.
@@ -1954,9 +2012,10 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		};
 
 		grip.setPointerCapture(event.pointerId);
-		grip.addEventListener("pointermove", onMove);
-		grip.addEventListener("pointerup", finish);
-		grip.addEventListener("pointercancel", finish);
+		// On the window: scrolled far, the editor drops the grip from the page.
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", finish);
+		window.addEventListener("pointercancel", finish);
 	}
 
 	// Put item `index` (with its sub-items) at `landAt` among the other items, at `depth`.
@@ -2393,21 +2452,25 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		card.removeClass("fkm-lifted");
 		card.addClass("fkm-dragging");
 		let over = null;
-		const EDGE = 60; // px from the board's top/bottom edge that scrolls while dragging
+		let last = { x, y };
+		const findTarget = () => {
+			const target = document.elementFromPoint(last.x, last.y)?.closest?.(".fkm-card[data-path]") ?? null;
+			if (target !== over) {
+				over?.removeClass("fkm-drop-target");
+				over = target && target !== card ? target : null;
+				over?.addClass("fkm-drop-target");
+			}
+		};
+		const autoScroll = edgeAutoScroll(container, findTarget);
 		const drag = {
 			move: (px, py) => {
+				last = { x: px, y: py };
 				ghost.style.transform = `translate(${px - grab.x}px, ${py - grab.y}px) rotate(2deg)`;
-				const target = document.elementFromPoint(px, py)?.closest?.(".fkm-card[data-path]") ?? null;
-				if (target !== over) {
-					over?.removeClass("fkm-drop-target");
-					over = target && target !== card ? target : null;
-					over?.addClass("fkm-drop-target");
-				}
-				const box = container.getBoundingClientRect();
-				if (py < box.top + EDGE) container.scrollTop -= 12;
-				else if (py > box.bottom - EDGE) container.scrollTop += 12;
+				findTarget();
+				autoScroll.update(py);
 			},
 			end: () => {
+				autoScroll.stop();
 				ghost.remove();
 				document.body.removeClass("fkm-card-drag-active");
 				card.removeClass("fkm-dragging");

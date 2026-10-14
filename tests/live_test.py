@@ -312,6 +312,30 @@ def main():
         check("dragging far right still indents only one level",
               body() == "- [ ] A\n→- [ ] A1\n→- [ ] B\n→- [ ] B1\n→- [ ] C", body())
 
+        # Dragging an item to the bottom edge scrolls the note, like Keep, also while the
+        # pointer rests there; the item lands further down than was visible at first.
+        open_note("autoscroll", "".join(f"- [ ] Item {n}\n" for n in range(1, 81)))
+        start = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm;
+            cm.contentDOM.blur(); cm.scrollDOM.scrollTop = 0; await wait(400);
+            const l = [...cm.contentDOM.querySelectorAll('.cm-line')].find(l => /(^|\\D)Item 1$/.test(l.textContent.trim()));
+            const g = l.querySelector('.fkm-grip').getBoundingClientRect();
+            const box = cm.scrollDOM.getBoundingClientRect();
+            const visible = [...cm.contentDOM.querySelectorAll('.cm-line')].filter(l => l.getBoundingClientRect().bottom <= box.bottom).length;
+            return { x: g.left + g.width / 2, y: g.top + g.height / 2, bottom: Math.min(box.bottom, innerHeight), visible };""")
+        ob.mouse("mouseMoved", start["x"], start["y"], 0)
+        ob.mouse("mousePressed", start["x"], start["y"])
+        edge_y = start["bottom"] - 15
+        for k in range(1, 11):
+            ob.mouse("mouseMoved", start["x"], start["y"] + (edge_y - start["y"]) * k / 10)
+            time.sleep(0.03)
+        time.sleep(1.2)  # resting at the edge
+        ob.mouse("mouseReleased", start["x"], edge_y, 0)
+        time.sleep(0.8)
+        after = ob.js("""const cm = window.__tcLeaf.view.editor.cm;
+            return { scrolled: cm.scrollDOM.scrollTop, line: cm.state.doc.toString().split('\\n').indexOf('- [ ] Item 1') + 1 };""")
+        check("dragging an item to the bottom edge scrolls the note, and it lands further down",
+              after["scrolled"] > 200 and after["line"] > start["visible"] + 5, (start, after))
+
         # The indent button of the phone toolbar runs Obsidian's "Indent list" command.
         open_note("indent button", "- [ ] A\n- [ ] B\n")
         indent_cmd = """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc;
