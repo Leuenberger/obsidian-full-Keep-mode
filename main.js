@@ -267,6 +267,7 @@ function sinkItems(items) {
 }
 
 const ownEdit = Annotation.define(); // our own edits must not trigger sorting again
+const ownSelect = Annotation.define(); // our own selections (Ctrl/Cmd+A) are left as they are
 const refreshEffect = StateEffect.define();
 
 function writeItems(view, block, items, unit) {
@@ -743,11 +744,46 @@ function checklistExtension(plugin) {
 				const sel = view.state.selection.main;
 				// A second Ctrl+A selects everything, as usual.
 				if (sel.from === from && sel.to === to) return false;
-				view.dispatch({ selection: { anchor: from, head: to }, userEvent: "select" });
+				view.dispatch({ selection: { anchor: from, head: to }, userEvent: "select", annotations: ownSelect.of(true) });
 				return true;
 			},
 		},
 	]));
+
+	// Phones: a selection stays within one item's text, like in Keep, where every item
+	// is a text of its own: never the checkboxes or grips, never into the next item.
+	// "Select All" in an item selects its text (a second time: everything).
+	const itemOf = (doc, pos) => {
+		const lineNo = doc.lineAt(pos).number;
+		const block = findBlock(doc, lineNo, indentUnit(app));
+		const item = block?.items.find(i => i.line <= lineNo && lineNo <= i.line + i.extra.length);
+		if (!item) return null;
+		const from = textStart(doc, doc.line(item.line));
+		const to = doc.line(item.line + item.extra.length).to;
+		return from === null ? null : { from, to };
+	};
+	const keepSelectionInItem = EditorState.transactionFilter.of(tr => {
+		if (!obsidian.Platform.isMobile || !tr.selection || tr.docChanged || tr.annotation(ownSelect)) return tr;
+		if (!tr.isUserEvent("select") || !livePreview(tr.state) || !enabledFor(tr.state)) return tr;
+		const doc = tr.newDoc;
+		const sel = tr.selection.main;
+		if (sel.empty) return tr;
+		const before = tr.startState.selection.main;
+		// "Select All": the item the cursor is in.
+		if (sel.from <= bodyStart(doc) && sel.to >= doc.length) {
+			const item = itemOf(doc, Math.min(before.head, doc.length));
+			if (!item || (before.from === item.from && before.to === item.to)) return tr;
+			return [tr, { selection: EditorSelection.range(item.from, item.to), sequential: true }];
+		}
+		// Otherwise: within the item where the selection starts.
+		const item = itemOf(doc, sel.anchor);
+		if (!item) return tr;
+		const clamp = pos => Math.max(item.from, Math.min(item.to, pos));
+		const anchor = clamp(sel.anchor);
+		const head = clamp(sel.head);
+		if (anchor === sel.anchor && head === sel.head) return tr;
+		return [tr, { selection: EditorSelection.range(anchor, head), sequential: true }];
+	});
 
 	// Ticking or unticking an item (same line, only the tick changed): tick its
 	// sub-items along, and move it to its place - like Keep.
@@ -999,7 +1035,8 @@ function checklistExtension(plugin) {
 	});
 
 	// Phones: swipe an item sideways, anywhere on it, to indent or outdent it, like
-	// Keep. Not after a long press (that selects text), and not up or down (scrolling).
+	// Keep. Not after a long press or while text is selected (that's selecting text),
+	// and not up or down (scrolling).
 	const swipeIndent = ViewPlugin.fromClass(class {
 		constructor(view) {
 			this.dom = view.contentDOM;
@@ -1012,6 +1049,8 @@ function checklistExtension(plugin) {
 			this.onStart = event => {
 				this.start = null;
 				if (event.touches.length !== 1 || !livePreview(view.state) || !enabledFor(view.state)) return;
+				// Selecting text (or moving a selection's handles) moves sideways too.
+				if (!view.state.selection.main.empty || !(window.getSelection()?.isCollapsed ?? true)) return;
 				const line = event.target.closest?.(".cm-line.fkm-task, .cm-line.fkm-extra");
 				if (!line || event.target.closest(".fkm-grip, input, a")) return;
 				const touch = event.touches[0];
@@ -1054,7 +1093,7 @@ function checklistExtension(plugin) {
 		}
 	});
 
-	return [decorations, keepCursorOut, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent];
+	return [decorations, keepCursorOut, keepSelectionInItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent];
 }
 
 // ----- settings tab -------------------------------------------------------------------------

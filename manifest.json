@@ -1,7 +1,7 @@
 {
 	"id": "full-keep-mode",
 	"name": "Full Keep Mode",
-	"version": "2.5.12",
+	"version": "2.5.13",
 	"minAppVersion": "1.10.0",
 	"description": "Turn your notes into Google Keep: a board of coloured cards with pins, labels, archive and reminders, and Keep's checklists, where ticked items move down and items can be dragged and indented.",
 	"author": "Gabriel Leuenberger",

@@ -237,9 +237,9 @@ body.fkm-keep .fkm-card-item .fkm-card-check {
 	background-color: transparent;
 }
 
-.theme-dark .fkm-checkbox .task-list-item-checkbox,
-.theme-dark .fkm-ghost-item .task-list-item-checkbox,
-.theme-dark .fkm-card-item .fkm-card-check {
+body.fkm-keep.theme-dark .fkm-checkbox .task-list-item-checkbox,
+body.fkm-keep.theme-dark .fkm-ghost-item .task-list-item-checkbox,
+body.fkm-keep.theme-dark .fkm-card-item .fkm-card-check {
 	--fkm-box: rgba(255, 255, 255, 0.7);
 }
 
@@ -1177,4 +1177,11 @@ body.fkm-keep.is-phone.fkm-keep .notice-container {
 /* Phones: the coloured note's top bar keeps the colour too. */
 body.fkm-keep.is-mobile .fkm-note-colored .view-header {
 	background-color: var(--fkm-note-bg);
+}
+
+/* The checkbox is no text: it can't be selected or long-pressed like a word. */
+.fkm-checkbox {
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
 }
