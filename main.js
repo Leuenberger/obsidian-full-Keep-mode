@@ -1313,6 +1313,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			for (const c of COLORS) if (c.id) el.removeClass(`fkm-color-${c.id}`);
 		});
 		document.querySelectorAll(".fkm-has-footer").forEach(el => el.removeClass("fkm-has-footer"));
+		document.querySelectorAll(".fkm-board-leaf").forEach(el => el.removeClass("fkm-board-leaf"));
 		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
 		this.boardListeners.forEach(remove => remove());
 		this.boardListeners = [];
@@ -3122,6 +3123,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 	}
 
 	cleanup() {
+		this.leafContentEl?.removeClass("fkm-board-leaf");
 		this.plugin.boards.delete(this);
 		this.resizeObserver.disconnect();
 	}
@@ -3145,6 +3147,9 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 
 	async render() {
 		const token = ++this.renderToken;
+		// The tab shows a Keep board (styles.css: no Bases toolbar, Keep's greys).
+		this.leafContentEl = this.boardEl.closest(".workspace-leaf-content") ?? this.leafContentEl;
+		this.leafContentEl?.addClass("fkm-board-leaf");
 		const plugin = this.plugin;
 		const archive = this.isArchive();
 		const files = (this.data?.data ?? []).map(entry => entry.file)

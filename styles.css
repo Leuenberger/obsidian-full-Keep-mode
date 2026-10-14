@@ -114,12 +114,12 @@ button.fkm-reminder-remove {
 	box-shadow: var(--shadow-s);
 }
 
-.fkm-search input {
+body.fkm-keep .fkm-search input {
 	flex: 1;
 	min-width: 0;
-	border: none !important;
-	background: transparent !important;
-	box-shadow: none !important;
+	border: none;
+	background: transparent;
+	box-shadow: none;
 	padding: 4px 0;
 	font-size: var(--font-ui-medium);
 }
@@ -217,24 +217,24 @@ body.fkm-card-drag-active {
 }
 
 /* Keep's spacing: room between items, none between the lines of one item. */
-.cm-line.fkm-task {
-	padding-top: 0.45em !important;
+body.fkm-keep .cm-line.fkm-task {
+	padding-top: 0.45em;
 }
 
 /* Keep's gap between the checkbox and the item's text. */
-.fkm-checkbox .task-list-item-checkbox {
-	margin-inline-end: 0.9em !important;
+body.fkm-keep .markdown-source-view.mod-cm6 .fkm-checkbox .task-list-item-checkbox {
+	margin-inline-end: 0.9em;
 	vertical-align: middle;
 }
 
 /* Keep's checkbox: a clear 2 px outline (light on dark notes), no fill when ticked. */
-.fkm-checkbox .task-list-item-checkbox,
-.fkm-ghost-item .task-list-item-checkbox,
-.fkm-card-item .fkm-card-check {
+body.fkm-keep .fkm-checkbox .task-list-item-checkbox,
+body.fkm-keep .fkm-ghost-item .task-list-item-checkbox,
+body.fkm-keep .fkm-card-item .fkm-card-check {
 	--fkm-box: rgba(0, 0, 0, 0.6);
-	border: 2px solid var(--fkm-box) !important;
-	border-radius: 3px !important;
-	background-color: transparent !important;
+	border: 2px solid var(--fkm-box);
+	border-radius: 3px;
+	background-color: transparent;
 }
 
 .theme-dark .fkm-checkbox .task-list-item-checkbox,
@@ -243,10 +243,10 @@ body.fkm-card-drag-active {
 	--fkm-box: rgba(255, 255, 255, 0.7);
 }
 
-.fkm-checkbox .task-list-item-checkbox:checked::after,
-.fkm-ghost-item .task-list-item-checkbox:checked::after,
-.fkm-card-item .fkm-card-check:checked::after {
-	background-color: var(--fkm-box) !important;
+body.fkm-keep .fkm-checkbox .task-list-item-checkbox:checked::after,
+body.fkm-keep .fkm-ghost-item .task-list-item-checkbox:checked::after,
+body.fkm-keep .fkm-card-item .fkm-card-check:checked::after {
+	background-color: var(--fkm-box);
 }
 
 /* Phones: Keep's measures, taken from Keep's iPhone app side by side with this one:
@@ -258,12 +258,12 @@ body.fkm-card-drag-active {
 	line-height: 1.15;
 }
 
-.is-phone .cm-line.fkm-task {
-	padding-top: 12px !important;
+body.fkm-keep.is-phone .cm-line.fkm-task {
+	padding-top: 12px;
 }
 
-.is-phone .fkm-checkbox .task-list-item-checkbox {
-	margin-inline-end: 18px !important;
+body.fkm-keep.is-phone .markdown-source-view.mod-cm6 .fkm-checkbox .task-list-item-checkbox {
+	margin-inline-end: 18px;
 }
 
 body.is-phone .fkm-grip svg {
@@ -276,15 +276,14 @@ body.is-phone .fkm-grip svg {
 	--file-margins: 15px;
 }
 
-.is-phone .fkm-note-modal .cm-line.fkm-task,
-.is-phone .fkm-note-modal .cm-line.fkm-extra {
-	margin-inline-start: 28px !important;
+body.fkm-keep.is-phone .fkm-note-modal .fkm-checkbox {
+	margin-inline-start: 24px; /* the item's lines follow: they line up with its text */
 }
 
 /* Keep has no indentation lines; here they'd run through the sub-items' grips. */
-.cm-line.fkm-task .cm-indent::before,
-.cm-line.fkm-extra .cm-indent::before {
-	display: none !important;
+body.fkm-keep .cm-line.fkm-task .cm-indent::before,
+body.fkm-keep .cm-line.fkm-extra .cm-indent::before {
+	display: none;
 }
 
 /* ----- Drag grip: one indent step left of the checkbox, taking no space -----
@@ -354,12 +353,20 @@ body.is-phone .fkm-grip svg {
 	display: inline-block;
 }
 
-.cm-line.fkm-task.fkm-depth-0, .cm-line.fkm-extra.fkm-depth-0 { padding-inline-start: var(--fkm-hang-0, 31px) !important; text-indent: calc(-1 * var(--fkm-hang-0, 31px)) !important; }
-.cm-line.fkm-task.fkm-depth-1, .cm-line.fkm-extra.fkm-depth-1 { padding-inline-start: var(--fkm-hang-1, 67px) !important; text-indent: calc(-1 * var(--fkm-hang-1, 67px)) !important; }
-.cm-line.fkm-task.fkm-depth-2, .cm-line.fkm-extra.fkm-depth-2 { padding-inline-start: var(--fkm-hang-2, 103px) !important; text-indent: calc(-1 * var(--fkm-hang-2, 103px)) !important; }
-.cm-line.fkm-task.fkm-depth-3, .cm-line.fkm-extra.fkm-depth-3 { padding-inline-start: var(--fkm-hang-3, 139px) !important; text-indent: calc(-1 * var(--fkm-hang-3, 139px)) !important; }
-.cm-line.fkm-task.fkm-depth-4, .cm-line.fkm-extra.fkm-depth-4 { padding-inline-start: var(--fkm-hang-4, 175px) !important; text-indent: calc(-1 * var(--fkm-hang-4, 175px)) !important; }
-.cm-line.fkm-task.fkm-depth-5, .cm-line.fkm-extra.fkm-depth-5 { padding-inline-start: var(--fkm-hang-5, 211px) !important; text-indent: calc(-1 * var(--fkm-hang-5, 211px)) !important; }
+/* Obsidian sets each list line's indent as an inline style while it draws, which only
+   an important rule can replace: one rule, the measure per level comes from a variable. */
+body.fkm-keep .cm-line.fkm-task,
+body.fkm-keep .cm-line.fkm-extra {
+	padding-inline-start: var(--fkm-hang) !important;
+	text-indent: calc(-1 * var(--fkm-hang)) !important;
+}
+
+.cm-line.fkm-depth-0 { --fkm-hang: var(--fkm-hang-0, 31px); }
+.cm-line.fkm-depth-1 { --fkm-hang: var(--fkm-hang-1, 67px); }
+.cm-line.fkm-depth-2 { --fkm-hang: var(--fkm-hang-2, 103px); }
+.cm-line.fkm-depth-3 { --fkm-hang: var(--fkm-hang-3, 139px); }
+.cm-line.fkm-depth-4 { --fkm-hang: var(--fkm-hang-4, 175px); }
+.cm-line.fkm-depth-5 { --fkm-hang: var(--fkm-hang-5, 211px); }
 
 .fkm-extra-spacer.fkm-depth-0 { width: var(--fkm-spacer-0, 31px); }
 .fkm-extra-spacer.fkm-depth-1 { width: var(--fkm-spacer-1, 31px); }
@@ -409,23 +416,23 @@ body.is-phone .fkm-grip svg {
 /* ===== Keep pop-up on phones =====
    Obsidian's floating top bar would float over the note inside the pop-up:
    give it its own row at the top instead, without the sidebar button. */
-.is-mobile .fkm-note-modal .view-header,
-.is-mobile .fkm-new-note-modal .view-header {
-	position: static !important;
-	transform: none !important;
-	opacity: 1 !important; /* Obsidian fades it out while scrolling; Keep's stays */
-	transition: none !important;
+body.fkm-keep.is-mobile .fkm-note-modal .view-header,
+body.fkm-keep.is-mobile .fkm-new-note-modal .view-header {
+	position: static;
+	transform: none;
+	opacity: 1; /* Obsidian fades it out while scrolling; Keep's stays */
+	transition: none;
 	display: flex;
 	justify-content: flex-end;
 	height: auto;
-	margin: 0 !important;
+	margin: 0;
 	padding: 0 48px 4px 0; /* clear of the pop-up's close button */
 	background: none;
 }
 
-.is-mobile .fkm-note-modal .workspace-leaf-content,
-.is-mobile .fkm-new-note-modal .workspace-leaf-content {
-	padding-top: 0 !important;
+body.fkm-keep.is-mobile .fkm-note-modal .workspace-leaf-content,
+body.fkm-keep.is-mobile .fkm-new-note-modal .workspace-leaf-content {
+	padding-top: 0;
 }
 
 .is-mobile .fkm-note-modal .view-header-left,
@@ -442,9 +449,9 @@ body.is-phone .fkm-grip svg {
 }
 
 /* ===== Keep-style note: no properties above, labels and edit date below ===== */
-body.fkm-hide-properties .markdown-source-view .metadata-container,
-body.fkm-hide-properties .markdown-reading-view .metadata-container {
-	display: none !important; /* Obsidian shows it with a more specific rule */
+body.fkm-hide-properties {
+	--metadata-display-editing: none; /* Obsidian's own switch for the properties */
+	--metadata-display-reading: none;
 }
 
 .fkm-note-footer {
@@ -460,8 +467,9 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 	-webkit-user-select: none;
 }
 
-/* Right under the text: the editor's "scroll past the end" space moves below the footer. */
-.cm-sizer.fkm-has-footer .cm-content {
+/* Right under the text: the editor's "scroll past the end" space moves below the
+   footer. Obsidian sets it as an inline style, hence important. */
+body.fkm-keep .cm-sizer.fkm-has-footer .cm-content {
 	padding-bottom: 0 !important;
 }
 
@@ -499,8 +507,8 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 }
 
 /* ===== Labels: the side menu, the picker, and "+" below the note ===== */
-.fkm-labels-view {
-	padding: 8px 0 !important;
+body.fkm-keep .fkm-labels-view {
+	padding: 8px 0;
 }
 
 .fkm-labels-item {
@@ -625,14 +633,14 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 }
 
 /* Only pin, reminder and archive stay at the top. */
-.is-phone .fkm-note-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button),
-.is-phone .fkm-new-note-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button) {
-	display: none !important;
+body.fkm-keep.is-phone .fkm-note-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button),
+body.fkm-keep.is-phone .fkm-new-note-modal .view-actions > :not(.fkm-pin-button):not(.fkm-reminder-button):not(.fkm-archive-button) {
+	display: none;
 }
 
-.is-phone .fkm-note-modal .view-header,
-.is-phone .fkm-new-note-modal .view-header {
-	padding: 8px 4px 4px 56px !important; /* room for the back arrow on the left */
+body.fkm-keep.is-phone .fkm-note-modal .view-header,
+body.fkm-keep.is-phone .fkm-new-note-modal .view-header {
+	padding: 8px 4px 4px 56px; /* room for the back arrow on the left */
 }
 
 /* The pop-up's empty title row: the top bar moves up, level with the back arrow. */
@@ -642,9 +650,9 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 }
 
 /* The pop-up's close button becomes Keep's back arrow, top left. */
-.is-phone .modal .fkm-back-button {
-	left: 16px !important;
-	right: auto !important;
+body.fkm-keep.is-phone .modal .fkm-back-button {
+	left: 16px;
+	right: auto;
 }
 
 /* ===== The open note: its colour (the same shade as its card) and its Keep title ===== */
@@ -996,13 +1004,13 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 }
 
 /* The back arrow below the status bar, level with the top bar's buttons. */
-.is-phone .modal.fkm-note-modal .fkm-back-button {
-	top: calc(var(--safe-area-inset-top, 0px) + 8px) !important;
+body.fkm-keep.is-phone .modal.fkm-note-modal .fkm-back-button {
+	top: calc(var(--safe-area-inset-top, 0px) + 8px);
 }
 
 /* Keep has no toolbar above the board (views, sort, filter): the side menu has
    Notes and Archive. The .base file can still be edited as text. */
-.workspace-leaf-content[data-type="bases"]:has(.fkm-board) .bases-header {
+.workspace-leaf-content.fkm-board-leaf .bases-header {
 	display: none;
 }
 
@@ -1018,21 +1026,22 @@ body.fkm-hide-properties .markdown-reading-view .metadata-container {
 }
 
 /* The top bar of a coloured note takes its colour too. */
-.fkm-note-colored .view-header {
-	background-color: var(--fkm-note-bg) !important;
+.fkm-note-colored {
+	--file-header-background: var(--fkm-note-bg);
+	--file-header-background-focused: var(--fkm-note-bg);
 }
 
 /* ===== Titles like Keep's: regular weight, a bit larger than the text ===== */
-.markdown-source-view .inline-title,
-.markdown-source-view .fkm-title {
-	font-size: 1.4em !important;
-	font-weight: 400 !important;
+body.fkm-keep .markdown-source-view .inline-title,
+body.fkm-keep .markdown-source-view .fkm-title {
+	font-size: 1.4em;
+	font-weight: 400;
 	line-height: 1.3;
 }
 
-.fkm-card-title {
-	font-weight: 500 !important;
-	font-size: 1em !important;
+body.fkm-keep .fkm-card-title {
+	font-weight: 500;
+	font-size: 1em;
 }
 
 /* ===== The pop-up on a computer ===== */
@@ -1081,9 +1090,9 @@ body:not(.is-phone) .fkm-note-modal .view-header {
 }
 
 /* Notices at the bottom, like Keep's, not over the top bar's buttons. */
-body.fkm-keep.is-phone .notice-container {
-	top: auto !important;
-	bottom: calc(var(--safe-area-inset-bottom, 0px) + 80px) !important;
+body.fkm-keep.is-phone.fkm-keep .notice-container {
+	top: auto;
+	bottom: calc(var(--safe-area-inset-bottom, 0px) + 80px);
 }
 
 /* ===== Keep's "Edit labels" ===== */
@@ -1132,7 +1141,7 @@ body.fkm-keep.is-phone .notice-container {
 
 /* ===== Keep's greys (from Keep's iPhone app) =====
    Dark mode is shades of grey, not black: page #202124, cards #2d2e31. */
-.theme-dark .workspace-leaf-content:has(.fkm-board),
+.theme-dark .workspace-leaf-content.fkm-board-leaf,
 .theme-dark .workspace-leaf-content[data-type="full-keep-mode-labels"],
 .theme-dark .modal.fkm-note-modal:not(.fkm-note-colored),
 .theme-dark .modal.fkm-note-modal:not(.fkm-note-colored) .workspace-leaf-content {
@@ -1163,4 +1172,9 @@ body.fkm-keep.is-phone .notice-container {
 .theme-dark .fkm-take-note {
 	--background-primary: #2d2e31;
 	border-color: #4f5154;
+}
+
+/* Phones: the coloured note's top bar keeps the colour too. */
+body.fkm-keep.is-mobile .fkm-note-colored .view-header {
+	background-color: var(--fkm-note-bg);
 }

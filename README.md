@@ -145,6 +145,10 @@ To install by hand, put `main.js`, `manifest.json` and `styles.css` from the
 [latest release](../../releases/latest) into
 `<your vault>/.obsidian/plugins/full-keep-mode/`.
 
+**Privacy:** everything stays in your vault. The plugin makes no network
+connections; it reads your notes only to show them on the board and to search and
+list your labels.
+
 **Good to know:** reminders show up while Obsidian is open, and missed ones
 appear when you open it. Obsidian doesn't let plugins schedule notifications,
 so a reminder can't reach your phone while Obsidian is closed.
