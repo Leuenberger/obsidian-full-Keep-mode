@@ -188,6 +188,7 @@ open -a Obsidian --args --remote-debugging-port=9222
 
 pip install websocket-client pillow
 python tests/live_test.py                 # the tests (keep the Obsidian window visible)
+python tests/phone_test.py                # the same Obsidian in its phone layout
 python tests/record_board_demo.py         # re-records docs/board.gif (--dark: board-dark.gif)
 python tests/record_demo.py               # re-records docs/demo.gif
 ```

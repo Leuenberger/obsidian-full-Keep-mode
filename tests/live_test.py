@@ -829,6 +829,9 @@ def main():
                 const f = app.vault.getAbstractFileByPath(FOLDER + '/archive.md');
                 await app.fileManager.processFrontMatter(f, fm => { fm.keep_reminder = moment().subtract(1, 'minute').format('YYYY-MM-DDTHH:mm'); });
                 await wait(500);
+                // The plugin's own check (every 20 s) may have fired it meanwhile: start clean.
+                shown.length = 0;
+                document.querySelectorAll('.notice').forEach(n => { if (n.textContent.includes('archive')) n.remove(); });
                 delete plugin.settings.firedReminders[f.path];
                 const notices = () => [...document.querySelectorAll('.notice')].filter(n => n.textContent.includes('Reminder') && n.textContent.includes('archive')).length;
                 const before = notices();

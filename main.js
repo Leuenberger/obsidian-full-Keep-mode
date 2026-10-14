@@ -449,7 +449,9 @@ function checklistExtension(plugin) {
 			el.createSpan({ cls: "fkm-step-probe" }); // one indent step, for measuring
 			for (let k = 0; k < this.levels; k++) el.createSpan({ cls: "fkm-indent-step" });
 			if (this.grip) el.appendChild(makeGrip(view));
-			const label = el.createEl("label", { cls: "task-list-label fkm-checkbox" });
+			// A span, not a <label>: a tap anywhere on a label (also the gap to the text)
+			// would tick the checkbox.
+			const label = el.createSpan({ cls: "task-list-label fkm-checkbox" });
 			const box = label.createEl("input", { cls: "task-list-item-checkbox", type: "checkbox" });
 			box.dataset.task = this.mark;
 			box.checked = this.mark !== " ";
@@ -776,8 +778,9 @@ function checklistExtension(plugin) {
 	]));
 
 	// Phones: "Select All" in an item selects its text, like in Keep, where every item
-	// is a text of its own (a second time: everything). Selections being made are left
-	// alone: correcting them would break off the phone's own selecting.
+	// is a text of its own - always, also when the phone applies it again right after.
+	// Selections being made are left alone: correcting them would break off the phone's
+	// own selecting.
 	const itemOf = (doc, pos) => {
 		const lineNo = doc.lineAt(pos).number;
 		const block = findBlock(doc, lineNo, indentUnit(app));
@@ -788,8 +791,10 @@ function checklistExtension(plugin) {
 		return from === null ? null : { from, to };
 	};
 	const keepSelectionInItem = EditorState.transactionFilter.of(tr => {
+		// Any change of the selection alone: the phone's "Select All" comes from the page's
+		// own selection, which the editor passes on without saying where it came from.
 		if (!obsidian.Platform.isMobile || !tr.selection || tr.docChanged || tr.annotation(ownSelect)) return tr;
-		if (!tr.isUserEvent("select") || !livePreview(tr.state) || !enabledFor(tr.state)) return tr;
+		if (!livePreview(tr.state) || !enabledFor(tr.state)) return tr;
 		const doc = tr.newDoc;
 		const sel = tr.selection.main;
 		if (sel.empty) return tr;
@@ -797,7 +802,7 @@ function checklistExtension(plugin) {
 		// "Select All": the item the cursor is in.
 		if (sel.from <= bodyStart(doc) && sel.to >= doc.length) {
 			const item = itemOf(doc, Math.min(before.head, doc.length));
-			if (!item || (before.from === item.from && before.to === item.to)) return tr;
+			if (!item) return tr; // not in a checklist: the whole note, as usual
 			return [tr, { selection: EditorSelection.range(item.from, item.to), sequential: true }];
 		}
 		return tr;
