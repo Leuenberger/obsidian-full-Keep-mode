@@ -134,6 +134,41 @@ def main():
             const s = cm.state.selection.main; return [s.from, s.to, d.indexOf('Sub one') + 2, d.indexOf('Top two') + 3];""")
         lt.check("a selection being made is left as it is", made[:2] == made[2:], made)
 
+        # A long note: the editor draws only the part around the screen, and the phone's
+        # Select All selects what's drawn (seen in a recording from an iPhone).
+        long = "---\nkeep_color: blue\n---\n" + "".join(f"- [ ] Item {n}\n\t- [ ] Sub {n}\n\t\tsecond line {n}\n" for n in range(1, 301))
+        r = js(CM + f"""cm.dispatch({{ changes: {{ from: 0, to: cm.state.doc.length, insert: {json.dumps(long)} }} }}); await wait(600);
+            cm.focus(); const d = cm.state.doc.toString(); const at = d.indexOf("Sub 150") + 2;
+            cm.dispatch({{ selection: {{ anchor: at }}, scrollIntoView: true }}); await wait(800);
+            const drawn = !!cm.contentDOM.querySelector('.cm-gap') && cm.viewport.to < cm.state.doc.length;
+            // As recorded on an iPhone: the selection the editor got from the phone's Select All
+            // runs from the first drawn line to the end of the drawn part (Chrome reads the same
+            // page selection as the whole note, so it's given as the editor received it).
+            const first = cm.state.doc.lineAt(cm.viewport.from).from, last = cm.state.doc.lineAt(cm.viewport.to).to;
+            cm.dispatch({{ selection: {{ anchor: first, head: last }}, userEvent: "select" }}); await wait(500);
+            const s = cm.state.selection.main; return {{ drawn, text: cm.state.doc.sliceString(s.from, s.to) }};""")
+        lt.check("…also in a long note, where only part of it is drawn", r["drawn"] and r["text"] == "Sub 150\n\t\tsecond line 150", r)
+        reset()
+
+        # Dragging a selection's handle down to the next lines is a swipe down too: it
+        # mustn't put the keyboard away (that ends the selection).
+        def drag_down(selected):
+            return js(CM + f"""cm.focus(); const d = cm.state.doc.toString();
+                cm.dispatch({{ selection: {json.dumps(selected)} ? {{ anchor: d.indexOf('Sub one'), head: d.indexOf('Sub one') + 3 }} : {{ anchor: d.indexOf('Sub one') + 2 }} }}); await wait(300);
+                const l = [...cm.contentDOM.querySelectorAll('.cm-line')].find(l => l.textContent.includes('Sub one'));
+                const r = l.getBoundingClientRect(); const x0 = r.left + 120, y0 = r.top + 10;
+                const ev = (type, y) => {{ const t = new Touch({{ identifier: 2, target: l, clientX: x0 + 3, clientY: y }});
+                    l.dispatchEvent(new TouchEvent(type, {{ touches: type === 'touchend' ? [] : [t], changedTouches: [t], bubbles: true, cancelable: true }})); }};
+                ev('touchstart', y0);
+                for (let k = 1; k <= 6; k++) {{ ev('touchmove', y0 + 12 * k); await wait(30); }}
+                ev('touchend', y0 + 72); await wait(300);
+                return {{ focused: cm.hasFocus, selected: !cm.state.selection.main.empty }};""")
+        r = drag_down(True)
+        lt.check("dragging a selection down doesn't put the keyboard away or end the selection", r == {"focused": True, "selected": True}, r)
+        r = drag_down(False)
+        lt.check("…while a swipe down without a selection does put the keyboard away", r["focused"] is False, r)
+        reset()
+
         print("Taps")
         reset()
         def point(which):

@@ -25,7 +25,7 @@
 
 const obsidian = require("obsidian");
 const { EditorView, Decoration, WidgetType, ViewPlugin, keymap } = require("@codemirror/view");
-const { EditorState, EditorSelection, StateField, StateEffect, Annotation, Prec } = require("@codemirror/state");
+const { EditorState, EditorSelection, StateField, StateEffect, Annotation, Prec, Transaction } = require("@codemirror/state");
 
 const DEFAULT_SETTINGS = {
 	sinkTicked: true, // move ticked items below the divider
@@ -778,9 +778,11 @@ function checklistExtension(plugin) {
 	]));
 
 	// Phones: "Select All" in an item selects its text, like in Keep, where every item
-	// is a text of its own - always, also when the phone applies it again right after.
-	// Selections being made are left alone: correcting them would break off the phone's
-	// own selecting.
+	// is a text of its own. The phone's Select All selects everything the editor has
+	// drawn - in a long note only the part around what's on screen, not the whole note -
+	// so that is what's recognised: a selection covering all of it, made in one step from
+	// a cursor or selection in an item. Selections being made are left alone (correcting
+	// them would break off the phone's own selecting).
 	const itemOf = (doc, pos) => {
 		const lineNo = doc.lineAt(pos).number;
 		const block = findBlock(doc, lineNo, indentUnit(app));
@@ -790,22 +792,26 @@ function checklistExtension(plugin) {
 		const to = doc.line(item.line + item.extra.length).to;
 		return from === null ? null : { from, to };
 	};
-	const keepSelectionInItem = EditorState.transactionFilter.of(tr => {
-		// Any change of the selection alone: the phone's "Select All" comes from the page's
-		// own selection, which the editor passes on without saying where it came from.
-		if (!obsidian.Platform.isMobile || !tr.selection || tr.docChanged || tr.annotation(ownSelect)) return tr;
-		if (!livePreview(tr.state) || !enabledFor(tr.state)) return tr;
-		const doc = tr.newDoc;
-		const sel = tr.selection.main;
-		if (sel.empty) return tr;
-		const before = tr.startState.selection.main;
-		// "Select All": the item the cursor is in.
-		if (sel.from <= bodyStart(doc) && sel.to >= doc.length) {
+	const selectAllInItem = ViewPlugin.fromClass(class {
+		update(update) {
+			if (!obsidian.Platform.isMobile || !update.selectionSet || update.docChanged) return;
+			if (update.transactions.some(tr => tr.annotation(ownSelect))) return;
+			const { state, view } = update;
+			if (!livePreview(state) || !enabledFor(state)) return;
+			const sel = state.selection.main;
+			if (sel.empty) return;
+			const doc = state.doc;
+			const drawnFrom = Math.max(view.viewport.from, bodyStart(doc));
+			const drawnTo = Math.min(view.viewport.to, doc.length);
+			if (sel.from > drawnFrom || sel.to < drawnTo) return;
+			const before = update.startState.selection.main;
 			const item = itemOf(doc, Math.min(before.head, doc.length));
-			if (!item) return tr; // not in a checklist: the whole note, as usual
-			return [tr, { selection: EditorSelection.range(item.from, item.to), sequential: true }];
+			if (!item || (sel.from === item.from && sel.to === item.to)) return;
+			setTimeout(() => {
+				if (!view.dom.isConnected || view.state.selection.main.from !== sel.from || view.state.selection.main.to !== sel.to) return;
+				view.dispatch({ selection: EditorSelection.range(item.from, item.to), annotations: ownSelect.of(true) });
+			}, 0);
 		}
-		return tr;
 	});
 
 	// Ticking or unticking an item (same line, only the tick changed): tick its
@@ -1121,7 +1127,30 @@ function checklistExtension(plugin) {
 		}
 	});
 
-	return [decorations, keepCursorOut, keepSelectionInItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent];
+	// The selection recorder (command "Record selections"): every selection change, with
+	// where it came from and what the plugin's rules made of it.
+	const recordSelections = EditorView.updateListener.of(update => {
+		if (!plugin.selectionLog || !update.transactions.length) return;
+		const doc = update.state.doc;
+		const where = pos => {
+			const line = doc.lineAt(Math.min(pos, doc.length));
+			return `${line.number}:${pos - line.from}`;
+		};
+		const range = sel => `${where(sel.anchor)}-${where(sel.head)}`;
+		for (const tr of update.transactions) {
+			if (!tr.selection && !tr.docChanged) continue;
+			plugin.logSelection("tx", {
+				event: tr.annotation(Transaction.userEvent) ?? null,
+				from: range(tr.startState.selection.main),
+				to: range(tr.state.selection.main),
+				asked: tr.selection ? range(tr.selection.main) : null,
+				doc: tr.docChanged,
+				len: doc.length,
+			});
+		}
+	});
+
+	return [decorations, keepCursorOut, selectAllInItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
 }
 
 // ----- settings tab -------------------------------------------------------------------------
@@ -1216,6 +1245,11 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.addSettingTab(new FullKeepModeSettingTab(this.app, this));
 
 		this.addCommand({
+			id: "record-selections",
+			name: "Record selections (for a bug report)",
+			callback: () => void this.toggleSelectionLog(),
+		});
+		this.addCommand({
 			id: "sort-ticked-items",
 			name: "Move ticked items down in this note",
 			editorCallback: editor => this.sortNote(editor.cm),
@@ -1288,6 +1322,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			const has = this.hasCheckboxes(file);
 			menu.addItem(item => item.setTitle(has ? "Hide checkboxes" : "Show checkboxes").setIcon("square-check-big").setSection("action")
 				.onClick(() => void this.setCheckboxes(file, !has)));
+			menu.addItem(item => item.setTitle(this.selectionLog ? "Stop recording selections" : "Record selections (for a bug report)")
+				.setIcon(this.selectionLog ? "square" : "circle-dot").setSection("action")
+				.onClick(() => void this.toggleSelectionLog()));
 		}));
 		this.app.workspace.onLayoutReady(() => {
 			if (!this._loaded) return; // turned off (reloaded or updated) in the meantime
@@ -1384,6 +1421,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
 		this.boardListeners.forEach(remove => remove());
 		this.boardListeners = [];
+		this.selectionLogOff?.();
+		this.selectionLog = null;
 	}
 
 	async loadSettings() {
@@ -1906,6 +1945,55 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			if (Notification.permission === "granted") show();
 			else if (Notification.permission !== "denied") void Notification.requestPermission().then(p => p === "granted" && show());
 		}
+	}
+
+	// ----- the selection recorder (for bug reports from phones) --------------------------------
+
+	logSelection(kind, data) {
+		if (!this.selectionLog || this.selectionLog.length > 3000) return;
+		this.selectionLog.push({ t: Math.round(performance.now() - this.selectionLogStart), kind, ...data });
+	}
+
+	async toggleSelectionLog() {
+		if (!this.selectionLog) {
+			this.selectionLog = [];
+			this.selectionLogStart = performance.now();
+			const describe = node => {
+				if (!node) return null;
+				const el = node.nodeType === 3 ? node.parentElement : node;
+				const line = el?.closest?.(".cm-line");
+				const cls = el?.className && typeof el.className === "string" ? el.className.split(" ").slice(0, 2).join(".") : el?.nodeName;
+				return `${line ? JSON.stringify(line.textContent.slice(0, 14)) : "-"} ${node.nodeType === 3 ? "#text" : cls}`;
+			};
+			const onSelection = () => {
+				const sel = window.getSelection();
+				this.logSelection("dom", { anchor: `${describe(sel?.anchorNode)}@${sel?.anchorOffset}`, focus: `${describe(sel?.focusNode)}@${sel?.focusOffset}`, collapsed: sel?.isCollapsed });
+			};
+			let lastMove = 0;
+			const onTouch = event => {
+				if (event.type === "touchmove" && performance.now() - lastMove < 80) return;
+				if (event.type === "touchmove") lastMove = performance.now();
+				const t = event.changedTouches[0];
+				this.logSelection(event.type, { x: Math.round(t?.clientX ?? 0), y: Math.round(t?.clientY ?? 0), target: describe(event.target), stopped: event.defaultPrevented });
+			};
+			const onInput = event => this.logSelection(event.type, { input: event.inputType ?? null, key: event.key ?? null });
+			const listeners = [["selectionchange", onSelection], ["touchstart", onTouch], ["touchmove", onTouch], ["touchend", onTouch],
+				["touchcancel", onTouch], ["beforeinput", onInput], ["keydown", onInput], ["copy", onInput], ["contextmenu", onInput]];
+			listeners.forEach(([type, fn]) => document.addEventListener(type, fn, { capture: true, passive: true }));
+			this.selectionLogOff = () => listeners.forEach(([type, fn]) => document.removeEventListener(type, fn, { capture: true }));
+			new obsidian.Notice("Recording selections. Do what goes wrong, then run \"Record selections\" again to save.");
+			return;
+		}
+		this.selectionLogOff?.();
+		const log = this.selectionLog;
+		this.selectionLog = null;
+		const device = `${obsidian.Platform.isIosApp ? "iOS" : obsidian.Platform.isAndroidApp ? "Android" : "desktop"} ${navigator.userAgent}`;
+		const text = `Full Keep Mode ${this.manifest.version}, ${device}\n\n\`\`\`\n${log.map(e => JSON.stringify(e)).join("\n")}\n\`\`\`\n`;
+		const path = "Full Keep Mode selection log.md";
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (file instanceof obsidian.TFile) await this.app.vault.modify(file, text);
+		else await this.app.vault.create(path, text);
+		new obsidian.Notice(`Saved ${log.length} steps to "${path}".`);
 	}
 
 	// ----- pin and colour -----------------------------------------------------------------
@@ -3033,16 +3121,32 @@ class NoteModal extends obsidian.Modal {
 	}
 
 	// Phones: swiping down over the note puts the keyboard away, like in Keep.
+	// Not while selecting text: dragging a selection's handle down to the next lines is
+	// a swipe down too, and putting the keyboard away ends the selection. Nor after a
+	// long press (that's selecting, or moving the cursor with the magnifier).
 	swipeDownHidesKeyboard() {
 		let start = null;
+		const selecting = () => !(window.getSelection()?.isCollapsed ?? true);
 		this.modalEl.addEventListener("touchstart", event => {
 			const t = event.touches[0];
-			start = event.touches.length === 1 && !event.target.closest(".fkm-grip") ? { x: t.clientX, y: t.clientY } : null;
+			start = event.touches.length === 1 && !event.target.closest(".fkm-grip") && !selecting()
+				? { x: t.clientX, y: t.clientY, time: Date.now(), moved: false } : null;
 		}, { passive: true });
 		this.modalEl.addEventListener("touchmove", event => {
 			if (!start) return;
 			const t = event.touches[0];
 			const dy = t.clientY - start.y;
+			if (!start.moved && Math.hypot(t.clientX - start.x, dy) > 10) {
+				start.moved = true;
+				if (Date.now() - start.time > 450) {
+					start = null; // a long press first
+					return;
+				}
+			}
+			if (selecting()) {
+				start = null;
+				return;
+			}
 			if (dy < 40 || Math.abs(t.clientX - start.x) > dy) return;
 			start = null;
 			const focused = document.activeElement;
