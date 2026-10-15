@@ -404,6 +404,54 @@ def main():
         after = enter_at_end_of(3)
         check("…and at the end of one without, a new item as usual", after == "- [ ] A\n\t- [ ] B\n- [ ] C\n- [ ] New\n", repr(after))
 
+        # Keep's x: on the item being edited, deletes it with its sub-items; Undo brings it back.
+        open_note("delete x", "- [ ] A\n- [ ] B\n\t- [ ] B1\n\t\tmore of B1\n- [ ] C\n")
+        x = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; cm.focus();
+            const d = cm.state.doc.toString(); cm.dispatch({ selection: { anchor: d.indexOf('B\\n') } }); await wait(300);
+            const shown = [...cm.contentDOM.querySelectorAll('.fkm-delete')].filter(e => getComputedStyle(e).visibility === 'visible')
+                .map(e => e.closest('.cm-line').textContent.trim());
+            const el = [...cm.contentDOM.querySelectorAll('.cm-line')].find(l => l.textContent.trim().endsWith('B')).querySelector('.fkm-delete');
+            const r = el.getBoundingClientRect(); return { shown, x: r.left + r.width / 2, y: r.top + r.height / 2 };""")
+        check("the x shows on the item being edited only", x["shown"] == ["B"], x["shown"])
+        ob.mouse("mouseMoved", x["x"], x["y"], 0)
+        ob.mouse("mousePressed", x["x"], x["y"])
+        ob.mouse("mouseReleased", x["x"], x["y"], 0)
+        time.sleep(0.6)
+        after = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const h = cm.state.selection.main.head;
+            return { text: cm.state.doc.toString(), at: cm.state.doc.sliceString(h - 1, h), focused: cm.hasFocus };""")
+        check("…tapping it deletes the item with its sub-items, the cursor goes to the item above",
+              after["text"] == "- [ ] A\n- [ ] C\n" and after["at"] == "A" and after["focused"], after)
+        undo()
+        check("…and Undo brings it back", text() == "- [ ] A\n- [ ] B\n\t- [ ] B1\n\t\tmore of B1\n- [ ] C\n", repr(text()))
+
+        # A ticked item with a Shift+Enter line: both lines struck through.
+        open_note("ticked lines", "- [ ] A\n- [x] Done\n\tmore of done\n")
+        deco = ob.js("""const ls = [...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.cm-line')];
+            const of = t => getComputedStyle(ls.find(l => l.textContent.includes(t))).textDecorationLine;
+            const inner = t => { const l = ls.find(l => l.textContent.includes(t)); const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n;
+                while ((n = w.nextNode())) if (n.textContent.includes(t)) return getComputedStyle(n.parentElement).textDecorationLine + '|' + of(t); };
+            return { first: inner('Done'), extra: of('more of done') };""")
+        check("a ticked item's Shift+Enter lines are struck through too", "line-through" in deco["extra"] and "line-through" in deco["first"], deco)
+
+        # The drop line while dragging: midway between the two items.
+        open_note("drop line", "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D\n")
+        g = ob.js(line_el("A") + "const r = el.querySelector('.fkm-grip').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };")
+        tgt = ob.js(line_el("C") + "const r = el.getBoundingClientRect(); return { y: r.top + 4 };")
+        ob.mouse("mouseMoved", g["x"], g["y"], 0)
+        ob.mouse("mousePressed", g["x"], g["y"])
+        for k in range(1, 9):
+            ob.mouse("mouseMoved", g["x"], g["y"] + (tgt["y"] - g["y"]) * k / 8)
+            time.sleep(0.03)
+        mid = ob.js("""const cm = window.__tcLeaf.view.editor.cm;
+            const textBox = t => { const l = [...cm.contentDOM.querySelectorAll('.cm-line')].find(l => l.textContent.trim().endsWith(t));
+                const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) if (n.textContent.includes(t)) { const r = document.createRange(); r.selectNodeContents(n); return r.getBoundingClientRect(); } };
+            const ind = document.querySelector('.fkm-drop-indicator').getBoundingClientRect();
+            return { line: ind.top + ind.height / 2, midway: (textBox('B').bottom + textBox('C').top) / 2 };""")
+        ob.mouse("mouseMoved", g["x"], g["y"])
+        ob.mouse("mouseReleased", g["x"], g["y"], 0)
+        time.sleep(0.6)
+        check("the drop line is midway between the items (within a pixel)", abs(mid["line"] - mid["midway"]) <= 1.0, mid)
+
         print("Keep-style editing")
         open_note("editing", "---\ntags:\n  - Shopping\nkeep_created: 2024-11-10T02:44:02\n---\n- [ ] Alpha\n- [ ] Beta\n→- [x] Gamma\n".replace("→", "\t"))
         boxes = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc;
@@ -639,6 +687,9 @@ def main():
             check("the pop-up's top bar has Undo, Redo, Pin and Colour", all(x in labels for x in ("Undo", "Redo", "Pin", "Colour")), labels)
             ob.js(PRELUDE + "document.querySelector('.fkm-note-modal .fkm-pin-button').click(); await wait(800);")
             check("the Pin button pins the note", frontmatter("Card B").get("keep_pinned") is True, frontmatter("Card B"))
+            orders = ob.js(PRELUDE + """return app.vault.getMarkdownFiles().filter(f => f.path.startsWith(FOLDER + '/Card')).map(f => [f.basename, app.metadataCache.getFileCache(f)?.frontmatter?.keep_order]);""")
+            top_b = dict(orders)["Card B"]
+            check("…and moves it to the top of the pinned notes, like Keep", all(top_b > o for n, o in orders if n != "Card B" and o is not None), orders)
             ob.js(PRELUDE + """document.querySelector('.fkm-note-modal .fkm-color-button').click(); await wait(400);
                 const item = [...document.querySelectorAll('.menu .menu-item')].find(i => i.textContent.trim() === 'Fog');
                 item.click(); await wait(800);""")

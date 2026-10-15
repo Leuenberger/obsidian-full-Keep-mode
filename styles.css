@@ -218,7 +218,8 @@ body.fkm-card-drag-active {
 
 /* Keep's spacing: room between items, none between the lines of one item. */
 body.fkm-keep .cm-line.fkm-task {
-	padding-top: 0.45em;
+	--fkm-item-space: 0.45em;
+	padding-top: var(--fkm-item-space);
 }
 
 /* Keep's gap between the checkbox and the item's text. */
@@ -259,7 +260,8 @@ body.fkm-keep .fkm-card-item .fkm-card-check:checked::after {
 }
 
 body.fkm-keep.is-phone .cm-line.fkm-task {
-	padding-top: 12px;
+	--fkm-item-space: 12px;
+	padding-top: var(--fkm-item-space);
 }
 
 body.fkm-keep.is-phone .markdown-source-view.mod-cm6 .fkm-checkbox .task-list-item-checkbox {
@@ -837,13 +839,15 @@ body.fkm-keep.is-phone .modal .fkm-back-button {
 	padding-top: 6px;
 }
 
+/* Phones: Keep's card text, measured against Keep's iPhone app: the title 10.7 pt from
+   the card's left edge and its capitals 13.7 pt from the top, the text below in line. */
 .is-phone .fkm-card-body {
 	max-height: 14em;
-	padding: 6px 12px 10px;
+	padding: 6px 9px 10px;
 }
 
 .is-phone .fkm-card-title {
-	padding: 10px 12px 0;
+	padding: 7px 9px 0;
 }
 
 /* Long notes fade out at the bottom of the card. */
@@ -1210,4 +1214,67 @@ body.fkm-keep.is-mobile .fkm-note-colored .view-header {
 .fkm-extra-spacer {
 	-webkit-user-select: none;
 	user-select: none;
+}
+
+/* ===== Keep's text colours on cards: grey titles and items, lighter plain text ===== */
+.fkm-card {
+	--fkm-card-ink: rgba(0, 0, 0, 0.71);
+	--fkm-card-ink-soft: rgba(0, 0, 0, 0.5);
+}
+
+.theme-dark .fkm-card {
+	--fkm-card-ink: #ffffff;
+	--fkm-card-ink-soft: rgba(255, 255, 255, 0.71);
+}
+
+.fkm-card-title,
+.fkm-card-item {
+	color: var(--fkm-card-ink);
+}
+
+.fkm-card-text {
+	color: var(--fkm-card-ink-soft);
+}
+
+/* ===== Keep's x, right of the item being edited (or under the mouse) ===== */
+.cm-line.fkm-item {
+	position: relative;
+}
+
+.cm-line.fkm-item,
+.cm-line.fkm-extra {
+	padding-inline-end: 36px; /* the text wraps before the x */
+}
+
+.fkm-delete {
+	position: absolute;
+	right: 0;
+	top: var(--fkm-item-space, 0);
+	height: 1lh;
+	display: inline-flex;
+	align-items: center;
+	padding: 0 6px;
+	visibility: hidden;
+	color: var(--text-muted);
+	text-indent: 0;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+
+.cm-editor.cm-focused .cm-line.fkm-current .fkm-delete,
+body:not(.is-mobile) .cm-line.fkm-item:hover .fkm-delete {
+	visibility: visible;
+}
+
+/* ===== Ticked items: their extra lines (Shift+Enter) are struck through too ===== */
+.cm-line.fkm-extra.fkm-done {
+	text-decoration: var(--checklist-done-decoration, line-through);
+	color: var(--checklist-done-color, var(--text-muted));
+}
+
+/* The space after the checkbox isn't struck through with a ticked item's text. */
+.fkm-prefix-space {
+	display: inline-block;
+	white-space: pre;
 }

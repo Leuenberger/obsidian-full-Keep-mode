@@ -469,6 +469,57 @@ function checklistExtension(plugin) {
 		}
 	}
 
+	// Keep's ×, right of the item being edited (and of the one under the mouse): deletes
+	// the item with its sub-items, like Keep. Not text either.
+	const deleteItemAt = (view, el) => {
+		const { state } = view;
+		const doc = state.doc;
+		const unit = indentUnit(app);
+		const lineNo = doc.lineAt(view.posAtDOM(el)).number;
+		const block = findBlock(doc, lineNo, unit);
+		const index = block ? block.items.findIndex(i => i.line === lineNo) : -1;
+		if (index < 0) return;
+		const items = block.items;
+		const end = descendantsEnd(items, index);
+		const lastLine = end < items.length ? items[end].line - 1 : block.toLine;
+		const first = doc.line(items[index].line);
+		const last = doc.line(lastLine);
+		// The lines go, with one line break; the cursor goes to the end of the item above.
+		const from = first.from > 0 ? first.from - 1 : first.from;
+		const to = first.from > 0 ? last.to : Math.min(last.to + 1, doc.length);
+		const restoreScroll = keepScroll(view);
+		view.dispatch({ changes: { from, to }, selection: { anchor: from }, userEvent: "delete", scrollIntoView: false });
+		restoreScroll();
+	};
+	class DeleteWidget extends WidgetType {
+		eq() {
+			return true;
+		}
+		toDOM(view) {
+			const el = createSpan({ cls: "fkm-delete clickable-icon", attr: { "aria-label": "Delete" } });
+			obsidian.setIcon(el, "x");
+			// Neither the cursor nor the keyboard moves; the item just goes.
+			el.addEventListener("mousedown", event => event.preventDefault());
+			el.addEventListener("click", event => {
+				event.preventDefault();
+				deleteItemAt(view, el);
+			});
+			el.addEventListener("touchstart", event => {
+				if (event.cancelable) event.preventDefault();
+				event.stopPropagation();
+			}, { passive: false });
+			el.addEventListener("touchend", event => {
+				if (event.cancelable) event.preventDefault();
+				event.stopPropagation();
+				deleteItemAt(view, el);
+			}, { passive: false });
+			return el;
+		}
+		ignoreEvent() {
+			return true;
+		}
+	}
+
 	// Source mode: the raw "- [ ]" stays text, with a grip in front of it.
 	class GripWidget extends WidgetType {
 		eq() {
@@ -601,6 +652,10 @@ function checklistExtension(plugin) {
 					// After the indentation, so the grip floats right next to the checkbox.
 					decos.push(Decoration.widget({ widget: new GripWidget(), side: -1 }).range(boxFrom));
 				}
+				if (live) {
+					decos.push(Decoration.widget({ widget: new DeleteWidget(), side: 1 }).range(head.to));
+					decos.push(Decoration.line({ class: "fkm-item" }).range(head.from));
+				}
 				if (!s.alignExtraLines) return;
 				// Wrapped lines of the item hang exactly under its text.
 				decos.push(Decoration.line({ class: `fkm-task fkm-depth-${depth}` }).range(head.from));
@@ -610,7 +665,7 @@ function checklistExtension(plugin) {
 					const line = doc.line(item.line + k);
 					if (!line.text.length) continue;
 					const lead = line.text.match(/^[ \t]*/)[0];
-					decos.push(Decoration.line({ class: `fkm-extra fkm-depth-${depth}` }).range(line.from));
+					decos.push(Decoration.line({ class: `fkm-extra fkm-depth-${depth}${item.checked ? " fkm-done" : ""}` }).range(line.from));
 					const spacer = new SpacerWidget(depth);
 					if (!live) continue;
 					if (lead.length) decos.push(Decoration.replace({ widget: spacer }).range(line.from, line.from + lead.length));
@@ -639,6 +694,22 @@ function checklistExtension(plugin) {
 		// Top priority, so the checkbox wins over Obsidian's own drawing of "- [ ]".
 		provide: field => [Prec.highest(EditorView.decorations.from(field)), EditorView.atomicRanges.of(view => view.state.field(field))],
 	});
+
+	// The item the cursor is in (its first line), for Keep's ×.
+	const currentItem = StateField.define({
+		create: state => markCurrent(state),
+		update: (deco, tr) => (tr.docChanged || tr.selection ? markCurrent(tr.state) : deco),
+		provide: field => EditorView.decorations.from(field),
+	});
+	function markCurrent(state) {
+		if (!livePreview(state) || !enabledFor(state)) return Decoration.none;
+		const doc = state.doc;
+		const lineNo = doc.lineAt(state.selection.main.head).number;
+		const block = findBlock(doc, lineNo, indentUnit(app));
+		const item = block?.items.find(i => i.line <= lineNo && lineNo <= i.line + i.extra.length);
+		if (!item) return Decoration.none;
+		return Decoration.set([Decoration.line({ class: "fkm-current" }).range(doc.line(item.line).from)]);
+	}
 
 	// Like Keep, the cursor never goes into "- [ ]": a click or arrow key that would
 	// put it there puts it at the start of the item's text instead, and Left at the
@@ -1150,7 +1221,7 @@ function checklistExtension(plugin) {
 		}
 	});
 
-	return [decorations, keepCursorOut, selectAllInItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
+	return [decorations, currentItem, keepCursorOut, selectAllInItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
 }
 
 // ----- settings tab -------------------------------------------------------------------------
@@ -2018,9 +2089,15 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const file = view.file;
 		if (!file || file.extension !== "md") return;
 		const pinned = this.isPinned(file);
+		// Like Keep: pinned or unpinned, the note goes to the top of its section.
+		const top = this.app.vault.getMarkdownFiles().reduce((max, f) => {
+			const order = Number(this.frontmatterOf(f)[ORDER_PROPERTY]);
+			return f !== file && Number.isFinite(order) ? Math.max(max, order) : max;
+		}, 0);
 		await this.app.fileManager.processFrontMatter(file, fm => {
 			if (pinned) delete fm[PIN_PROPERTY];
 			else fm[PIN_PROPERTY] = true;
+			fm[ORDER_PROPERTY] = top + 1;
 		});
 	}
 
@@ -2130,12 +2207,17 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			let landAt = restInsert;
 			if (!inPlace) while (landAt < rest.length && rest[landAt].depth > depth) landAt++;
 			drop = { landAt, depth };
-			let lineY = after ? bottom : top;
-			if (landAt !== restInsert) {
-				lineY = landAt < rest.length
-					? view.documentTop + view.lineBlockAt(state.doc.line(rest[landAt].line).from).top
-					: view.documentTop + view.lineBlockAt(state.doc.line(block.toLine).from).bottom;
-			}
+			// Midway between the items: an item's line starts with the space above its text.
+			const spaceAbove = lineNo => {
+				const at = view.domAtPos(state.doc.line(lineNo).from).node;
+				const el = (at.nodeType === 3 ? at.parentElement : at)?.closest?.(".cm-line");
+				return el ? parseFloat(getComputedStyle(el).paddingTop) || 0 : 0;
+			};
+			const before = lineNo => view.documentTop + view.lineBlockAt(state.doc.line(lineNo).from).top + spaceAbove(lineNo) / 2;
+			const atEnd = () => view.documentTop + view.lineBlockAt(state.doc.line(block.toLine).from).bottom + spaceAbove(items[0].line) / 2;
+			let lineY = after ? (over + 1 < items.length ? before(items[over + 1].line) : atEnd()) : before(items[over].line);
+			if (landAt !== restInsert) lineY = landAt < rest.length ? before(rest[landAt].line) : atEnd();
+			lineY -= 1; // the line is 2 px high
 			const content = view.contentDOM.getBoundingClientRect();
 			const indentPx = (depth - base) * INDENT_STEP;
 			indicator.style.top = `${lineY}px`;

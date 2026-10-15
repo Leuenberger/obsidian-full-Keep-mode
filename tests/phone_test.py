@@ -182,6 +182,23 @@ def main():
         tap(point("box"))
         lt.check("a tap on the checkbox ticks it", "- [x] Sub one" in body(), body())
 
+        # Keep's x on the item being edited: a tap deletes it, the keyboard stays.
+        reset()
+        xp = js(CM + """cm.focus(); const d = cm.state.doc.toString(); cm.dispatch({ selection: { anchor: d.indexOf('Sub two') + 2 } }); await wait(300);
+            const vis = [...cm.contentDOM.querySelectorAll('.fkm-delete')].filter(e => getComputedStyle(e).visibility === 'visible');
+            const r = vis[0]?.getBoundingClientRect(); return { n: vis.length, x: r && r.left + r.width / 2, y: r && r.top + r.height / 2, right: r && innerWidth - r.right };""")
+        lt.check("the x shows on the item being edited, at the right", xp["n"] == 1 and xp["right"] < 40, xp)
+        tap(xp)
+        after = js(CM + "const d = cm.state.doc.toString(); return { text: d.slice(d.lastIndexOf('---') + 4), focused: cm.hasFocus };")
+        lt.check("…a tap on it deletes the item, the keyboard stays", after == {"text": "- [ ] Top one\n\t- [ ] Sub one\n\t\tsecond line\n- [ ] Top two\n", "focused": True}, after)
+
+        # Card titles on the board, as in Keep's iPhone app: 10.7 pt from the card's left edge.
+        card = js(PRE + """const c = [...document.querySelectorAll('.fkm-board .fkm-card')].find(c => c.querySelector('.fkm-card-title'));
+            const t = c.querySelector('.fkm-card-title'); const w = document.createTreeWalker(t, NodeFilter.SHOW_TEXT); const n = w.nextNode();
+            const r = document.createRange(); r.setStart(n, 0); r.setEnd(n, 1);
+            return { left: Math.round((r.getBoundingClientRect().left - c.getBoundingClientRect().left) * 10) / 10, weight: getComputedStyle(t).fontWeight, color: getComputedStyle(t).color };""")
+        lt.check("card titles 10.7 pt from the card's edge, medium weight, Keep's grey", 9.7 <= card["left"] <= 11.7 and card["weight"] == "500" and card["color"] in ("rgba(0, 0, 0, 0.71)", "rgb(255, 255, 255)"), card)
+
         print("Swiping")
         base = "- [ ] Top one\n\t- [ ] Sub one\n\t\tsecond line\n\t- [ ] Sub two\n- [ ] Top two\n"
         reset()
