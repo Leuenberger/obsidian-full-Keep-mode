@@ -210,6 +210,34 @@ def main():
         lt.check("Enter three times at the end of an item with sub-items: three new sub-items",
                  body() == "- [ ] Top one\n\t- [ ] \n\t- [ ] \n\t- [ ] \n\t- [ ] Sub one\n\t\tsecond line\n\t- [ ] Sub two\n- [ ] Top two\n", repr(body()))
 
+        # An empty item: its line has no text, yet a tap puts the cursor in it (and shows the x).
+        empty_note = "---" + chr(10) + "keep_color: blue" + chr(10) + "---" + chr(10) + "- [ ] Top one" + chr(10) + "- [ ] " + chr(10) + "- [ ] Top two" + chr(10)
+        js(CM + "cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: " + json.dumps(empty_note) + " } }); cm.contentDOM.blur(); await wait(700);")
+        def tap_empty(where):
+            p = js(CM + f"""const l = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-item')][1];
+                const r = l.getBoundingClientRect(); const pre = l.querySelector('.fkm-prefix-space').getBoundingClientRect();
+                return {json.dumps(where)} === 'blank' ? {{ x: r.right - 80, y: r.bottom - 8 }} : {{ x: l.querySelector('input').getBoundingClientRect().right + 12, y: pre.top + pre.height / 2 }};""")
+            js(CM + "cm.contentDOM.blur(); cm.dispatch({ selection: { anchor: 0 } }); await wait(300);")
+            tap(p)
+            return js(CM + """const h = cm.state.selection.main.head; const line = cm.state.doc.lineAt(h);
+                const x = [...cm.contentDOM.querySelectorAll('.fkm-delete')].filter(e => getComputedStyle(e).visibility === 'visible').length;
+                return { focused: cm.hasFocus, line: line.text, atEnd: h === line.to, x };""")
+        r = tap_empty("blank")
+        lt.check("a tap on an empty item puts the cursor in it, with its x", r == {"focused": True, "line": "- [ ] ", "atEnd": True, "x": 1}, r)
+        r = tap_empty("space")
+        lt.check("…also a tap in the gap next to its checkbox (no tick)", r == {"focused": True, "line": "- [ ] ", "atEnd": True, "x": 1}, r)
+        # Long text wraps before the x, never under it.
+        long_note = "---" + chr(10) + "keep_color: blue" + chr(10) + "---" + chr(10) + "- [ ] " + "a long item text " * 12 + chr(10) + chr(9) + "more " + "words here " * 10 + chr(10)
+        js(CM + "cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: " + json.dumps(long_note) + " } }); cm.focus(); cm.dispatch({ selection: { anchor: cm.state.doc.toString().indexOf('long') } }); await wait(500);")
+        over = js(CM + """const line = cm.contentDOM.querySelector('.cm-line.fkm-item'); const x = line.querySelector('.fkm-delete').getBoundingClientRect();
+            let overlap = false; for (const l of cm.contentDOM.querySelectorAll('.cm-line.fkm-item, .cm-line.fkm-extra')) {
+                const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n;
+                while ((n = w.nextNode())) { if (n.parentElement.closest('.fkm-prefix, .fkm-delete')) continue; const r = document.createRange(); r.selectNodeContents(n);
+                    for (const b of r.getClientRects()) if (b.right > x.left + 1 && b.top < x.bottom && b.bottom > x.top) overlap = true; } }
+            return overlap;""")
+        lt.check("long text wraps before the x, never under it", over is False, over)
+        reset()
+
         print("Swiping")
         base = "- [ ] Top one\n\t- [ ] Sub one\n\t\tsecond line\n\t- [ ] Sub two\n- [ ] Top two\n"
         reset()

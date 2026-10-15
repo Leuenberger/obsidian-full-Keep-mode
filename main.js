@@ -462,6 +462,12 @@ function checklistExtension(plugin) {
 				tickAt(view, el);
 			});
 			el.createSpan({ cls: "fkm-prefix-space", text: " " });
+			// Tappable itself, so a phone keeps a tap next to the checkbox where it is,
+			// instead of moving it onto the checkbox (phones move taps onto the nearest
+			// tappable thing). The tap puts the cursor at the item's text (tapToItem).
+			el.addEventListener("click", event => {
+				if (!event.target.closest("input, .fkm-grip")) event.preventDefault();
+			});
 			return el;
 		}
 		ignoreEvent() {
@@ -1240,7 +1246,63 @@ ${pad(depth)}${bullet} [${mark}] `;
 		}
 	});
 
-	return [decorations, currentItem, keepCursorOut, selectAllInItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
+	// A tap or click on a checklist line where there's no text to put the cursor in -
+	// the indentation, the space next to the checkbox, an empty item's line - puts the
+	// cursor at the start of the item's text, like in Keep. (An empty item's line holds
+	// no text at all, so a phone otherwise can't put the cursor in it.)
+	const cursorToItem = (view, el) => {
+		const line = view.state.doc.lineAt(view.posAtDOM(el));
+		const at = textStart(view.state.doc, line) ?? line.to;
+		view.focus();
+		view.dispatch({ selection: { anchor: at }, userEvent: "select.pointer" });
+	};
+	const noText = target => {
+		// Not the grip, the checkbox itself or the x (the gap next to the checkbox is fine).
+		if (target.closest?.(".fkm-grip, input, .fkm-delete")) return null;
+		const line = target.closest?.(".cm-line.fkm-item, .cm-line.fkm-extra");
+		if (!line) return null;
+		if (target.closest(".fkm-prefix, .fkm-extra-spacer")) return line;
+		// The line itself (not its text): only if the item has no text there.
+		return target === line && !line.textContent.trim() ? line : null;
+	};
+	// On the editor's element itself: the editor doesn't pass on events from its non-text
+	// pieces (the prefix, the spacer).
+	const tapToItem = ViewPlugin.fromClass(class {
+		constructor(view) {
+			this.dom = view.contentDOM;
+			let tap = null;
+			this.onTouchStart = event => {
+				const t = event.touches[0];
+				tap = event.touches.length === 1 ? { x: t.clientX, y: t.clientY, time: Date.now(), line: noText(event.target) } : null;
+			};
+			this.onTouchEnd = event => {
+				const start = tap;
+				tap = null;
+				if (!start?.line || !livePreview(view.state) || !enabledFor(view.state)) return;
+				const t = event.changedTouches[0];
+				if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10 || Date.now() - start.time > 500) return;
+				if (event.cancelable) event.preventDefault(); // no click, no cursor from the phone itself
+				cursorToItem(view, start.line);
+			};
+			this.onMouseDown = event => {
+				if (event.button !== 0 || !livePreview(view.state) || !enabledFor(view.state)) return;
+				const line = noText(event.target);
+				if (!line) return;
+				event.preventDefault();
+				cursorToItem(view, line);
+			};
+			this.dom.addEventListener("touchstart", this.onTouchStart, { passive: true });
+			this.dom.addEventListener("touchend", this.onTouchEnd, { passive: false });
+			this.dom.addEventListener("mousedown", this.onMouseDown);
+		}
+		destroy() {
+			this.dom.removeEventListener("touchstart", this.onTouchStart);
+			this.dom.removeEventListener("touchend", this.onTouchEnd);
+			this.dom.removeEventListener("mousedown", this.onMouseDown);
+		}
+	});
+
+	return [decorations, currentItem, keepCursorOut, selectAllInItem, tapToItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
 }
 
 // ----- settings tab -------------------------------------------------------------------------

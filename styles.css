@@ -378,15 +378,16 @@ body.fkm-keep .cm-line.fkm-extra {
 .fkm-extra-spacer.fkm-depth-5 { width: var(--fkm-spacer-5, 31px); }
 
 /* ----- "N ticked items" divider and ghost parents ----- */
+/* Space around the divider as padding: Obsidian sets every margin in the editor to 0. */
 .fkm-ticked-section {
-	margin: 6px 0 2px;
-	padding-top: 6px;
-	border-top: 1px solid var(--background-modifier-border);
+	padding: 6px 0 2px;
 	user-select: none;
 	-webkit-user-select: none;
 }
 
 .fkm-ticked-label {
+	padding-top: 6px;
+	border-top: 1px solid var(--background-modifier-border);
 	color: var(--text-muted);
 	font-size: var(--font-ui-small);
 }
@@ -1241,9 +1242,9 @@ body.fkm-keep.is-mobile .fkm-note-colored .view-header {
 	position: relative;
 }
 
-.cm-line.fkm-item,
-.cm-line.fkm-extra {
-	padding-inline-end: 36px; /* the text wraps before the x */
+body.fkm-keep .markdown-source-view.mod-cm6 .cm-line.fkm-item,
+body.fkm-keep .markdown-source-view.mod-cm6 .cm-line.fkm-extra {
+	padding-inline-end: 36px; /* the text wraps before the x (Obsidian's own rule is more specific than a plain one) */
 }
 
 .fkm-delete {
