@@ -199,6 +199,17 @@ def main():
             return { left: Math.round((r.getBoundingClientRect().left - c.getBoundingClientRect().left) * 10) / 10, weight: getComputedStyle(t).fontWeight, color: getComputedStyle(t).color };""")
         lt.check("card titles 10.7 pt from the card's edge, medium weight, Keep's grey", 9.7 <= card["left"] <= 11.7 and card["weight"] == "500" and card["color"] in ("rgba(0, 0, 0, 0.71)", "rgb(255, 255, 255)"), card)
 
+        # Enter three times at the end of an item with sub-items (as reported from an iPhone):
+        # three new sub-items, nothing moves out a level or loses its checkbox.
+        reset()
+        js(CM + "cm.focus(); const d = cm.state.doc.toString(); cm.dispatch({ selection: { anchor: d.indexOf('Top one') + 7 } }); await wait(200);")
+        for _ in range(3):
+            ob.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text="\r", unmodifiedText="\r")
+            ob.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+            time.sleep(0.3)
+        lt.check("Enter three times at the end of an item with sub-items: three new sub-items",
+                 body() == "- [ ] Top one\n\t- [ ] \n\t- [ ] \n\t- [ ] \n\t- [ ] Sub one\n\t\tsecond line\n\t- [ ] Sub two\n- [ ] Top two\n", repr(body()))
+
         print("Swiping")
         base = "- [ ] Top one\n\t- [ ] Sub one\n\t\tsecond line\n\t- [ ] Sub two\n- [ ] Top two\n"
         reset()

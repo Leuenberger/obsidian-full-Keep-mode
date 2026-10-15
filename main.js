@@ -746,8 +746,7 @@ function checklistExtension(plugin) {
 	});
 
 	// Keep-style keys in checklists:
-	//  - Enter at the end of an item with sub-items starts a new first sub-item (not a
-	//    new item that would take the sub-items over).
+	//  - Enter: Keep's rules (see below), never Obsidian's list rules.
 	//  - Shift+Enter starts a new line inside the item, lined up with its text.
 	//  - Backspace at the start of an item's text (or of a line inside an item) joins
 	//    it to the line above (an empty item disappears), instead of breaking up the
@@ -797,24 +796,44 @@ function checklistExtension(plugin) {
 			},
 		},
 		{
+			// Enter in a checklist always works like Keep's - Obsidian's list rules (an empty
+			// item moves out a level, then ends the list) never apply here:
+			//  - at the end of an item: a new item at its level; if it has sub-items, a new
+			//    first sub-item (a new item there would take the sub-items over)
+			//  - on an empty item: another empty item
+			//  - in the middle of the text: the item splits in two
+			//  - at the start of the text: a new empty item above
 			key: "Enter",
 			run: view => {
 				const { state } = view;
-				const sel = state.selection.main;
-				if (state.selection.ranges.length > 1 || !sel.empty || !livePreview(state) || !enabledFor(state)) return false;
+				if (state.selection.ranges.length > 1 || !livePreview(state) || !enabledFor(state)) return false;
 				const unit = indentUnit(app);
-				const line = state.doc.lineAt(sel.head);
-				const block = findBlock(state.doc, line.number, unit);
-				const index = block ? block.items.findIndex(i => i.line <= line.number && line.number <= i.line + i.extra.length) : -1;
+				const doc = state.doc;
+				const sel = state.selection.main;
+				const lineNo = doc.lineAt(sel.from).number;
+				const block = findBlock(doc, lineNo, unit);
+				const index = block ? block.items.findIndex(i => i.line <= lineNo && lineNo <= i.line + i.extra.length) : -1;
 				if (index < 0) return false;
 				const item = block.items[index];
+				const head = doc.line(item.line);
+				const start = textStart(doc, head) ?? head.to;
+				const last = doc.line(item.line + item.extra.length);
+				const bullet = parseTask(head.text, unit)?.bullet ?? "-";
+				const pad = depth => (unit.useTab ? "	".repeat(depth) : " ".repeat(unit.tabSize * depth));
+				if (sel.empty && lineNo === item.line && sel.from <= start && item.text.trim()) {
+					const insert = `${pad(item.depth)}${bullet} [ ] 
+`;
+					view.dispatch({ changes: { from: head.from, insert }, selection: { anchor: sel.from + insert.length }, userEvent: "input", scrollIntoView: true });
+					return true;
+				}
+				const from = Math.max(sel.from, start);
+				const atEnd = sel.to >= last.to;
 				const next = block.items[index + 1];
-				const last = state.doc.line(item.line + item.extra.length);
-				if (sel.head !== last.to || !next || next.depth <= item.depth || !item.text.trim()) return false;
-				const task = parseTask(state.doc.line(item.line).text, unit);
-				const pad = unit.useTab ? "\t".repeat(item.depth + 1) : " ".repeat(unit.tabSize * (item.depth + 1));
-				const insert = `\n${pad}${task?.bullet ?? "-"} [ ] `;
-				view.dispatch({ changes: { from: last.to, insert }, selection: { anchor: last.to + insert.length }, userEvent: "input", scrollIntoView: true });
+				const depth = atEnd && next && next.depth > item.depth ? item.depth + 1 : item.depth;
+				const mark = atEnd ? " " : item.mark; // the second half of a ticked item stays ticked
+				const insert = `
+${pad(depth)}${bullet} [${mark}] `;
+				view.dispatch({ changes: { from, to: Math.max(from, sel.to), insert }, selection: { anchor: from + insert.length }, userEvent: "input", scrollIntoView: true });
 				return true;
 			},
 		},

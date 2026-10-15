@@ -404,6 +404,30 @@ def main():
         after = enter_at_end_of(3)
         check("…and at the end of one without, a new item as usual", after == "- [ ] A\n\t- [ ] B\n- [ ] C\n- [ ] New\n", repr(after))
 
+        # Enter follows Keep's rules everywhere in a checklist, never Obsidian's list rules.
+        enter_notes = iter(range(1, 100))
+        def enters(note, at, presses, typed="X", at_start=False):
+            open_note(f"enter keys {next(enter_notes)}", note)
+            ob.js(PRELUDE + f"""const cm = window.__tcLeaf.view.editor.cm; cm.focus(); const d = cm.state.doc.toString();
+                const i = d.indexOf({json.dumps(at)}); cm.dispatch({{ selection: {{ anchor: i + ({0 if at_start else len(at)}) }} }}); await wait(200);""")
+            for _ in range(presses):
+                ob.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text="\r", unmodifiedText="\r")
+                ob.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+                time.sleep(0.3)
+            if typed:
+                ob.call("Input.insertText", text=typed)
+                time.sleep(0.3)
+            return text()
+        got = enters("- [ ] A\n\t- [ ] B\n- [ ] C\n", "A", 3)
+        check("Enter three times at the end of an item with sub-items: three new sub-items, nothing moves out or loses its checkbox",
+              got == "- [ ] A\n\t- [ ] \n\t- [ ] \n\t- [ ] X\n\t- [ ] B\n- [ ] C\n", repr(got))
+        got = enters("- [ ] A\n- [ ] \n- [ ] C\n", "- [ ] \n- [ ] C", 1, at_start=True)
+        check("Enter on an empty item: another empty item (no end of the list)", got == "- [ ] A\n- [ ] \n- [ ] X\n- [ ] C\n", repr(got))
+        got = enters("- [ ] Apple pie\n- [ ] C\n", "Apple", 1)
+        check("Enter in the middle of an item's text splits it", got == "- [ ] Apple\n- [ ] X pie\n- [ ] C\n", repr(got))
+        got = enters("- [ ] A\n- [ ] Banana\n", "Banana", 1, at_start=True)
+        check("Enter at the start of an item's text: a new empty item above", got == "- [ ] A\n- [ ] \n- [ ] XBanana\n", repr(got))
+
         # Keep's x: on the item being edited, deletes it with its sub-items; Undo brings it back.
         open_note("delete x", "- [ ] A\n- [ ] B\n\t- [ ] B1\n\t\tmore of B1\n- [ ] C\n")
         x = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; cm.focus();
