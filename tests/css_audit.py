@@ -122,7 +122,8 @@ def main():
         ob.js(PRE + """const leaf = window.__auditLeaf; await leaf.openFile(app.vault.getAbstractFileByPath(F + "/Board.base")); await wait(1800); return 1;""")
         audit("board")
         ob.js(PRE + """window.__auditLeaf.view.containerEl.querySelector('.fkm-card .fkm-card-title, .fkm-card').click(); await wait(1800);
-            const cm = app.plugins.plugins["full-keep-mode"].popupLeaf.view.editor.cm; cm.focus(); await wait(300); return 1;""")
+            const m = [...(app.plugins.plugins["full-keep-mode"].openNotes ?? [])].find(m => m.leaf?.view?.file?.path === F + "/Check.md");
+            m?.leaf.view.editor.cm.focus(); await wait(300); return 1;""")
         audit("pop-up")
     finally:
         ob.js(PRE + """document.querySelectorAll(".modal-container").forEach(m => m.remove()); window.__auditLeaf?.detach();

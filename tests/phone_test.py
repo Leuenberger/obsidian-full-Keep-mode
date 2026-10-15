@@ -18,7 +18,15 @@ ob = lt.ob
 F = "Full Keep Mode phone tests"
 TEXT = "---\nkeep_color: blue\n---\n- [ ] Top one\n\t- [ ] Sub one\n\t\tsecond line\n\t- [ ] Sub two\n- [ ] Top two\n"
 PRE = "const wait = ms => new Promise(r => setTimeout(r, ms));\n"
-CM = PRE + "const cm = app.plugins.plugins['full-keep-mode'].popupLeaf.view.editor.cm;\n"
+PATH = F + "/Phone.md"
+# The editor of the pop-up showing the test note - never just "the pop-up's editor", which
+# can be showing one of the user's notes (a test once overwrote a real note that way).
+CM = PRE + f"""const cm = (() => {{
+    const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].find(m => m.leaf?.view?.file?.path === {json.dumps(PATH)});
+    if (!m) throw new Error('The test note is not open in a pop-up: stopping, so that no other note is touched.');
+    return m.leaf.view.editor.cm;
+}})();
+"""
 
 
 def js(code):

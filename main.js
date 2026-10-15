@@ -3252,6 +3252,7 @@ class NoteModal extends obsidian.Modal {
 	}
 
 	async onOpen() {
+		(this.plugin.openNotes ??= new Set()).add(this); // the open pop-ups (also for tests: which note is where)
 		this.modalEl.addClass("fkm-note-modal");
 		if (this.isNew) this.modalEl.addClass("fkm-new-note-modal");
 		const content = this.contentEl;
@@ -3349,6 +3350,7 @@ class NoteModal extends obsidian.Modal {
 	}
 
 	async onClose() {
+		this.plugin.openNotes?.delete(this);
 		this.resizeObserver?.disconnect();
 		if (this.leafRef) this.app.workspace.offref(this.leafRef);
 		if (this.layoutRef) this.app.workspace.offref(this.layoutRef);
