@@ -257,6 +257,9 @@ def scroll_check():
 def main():
 
     try:
+        # Leftovers of an earlier run that couldn't clean up (e.g. Obsidian stopped answering).
+        ob.js(PRELUDE + """const old = app.vault.getAbstractFileByPath(FOLDER);
+            if (old) { for (const f of [...old.children]) await app.vault.trash(f, true); await app.vault.trash(old, true); }""")
         ob.js("""document.querySelectorAll(".modal-container").forEach(m => { m.dataset.tcHidden = "1"; m.style.visibility = "hidden"; });""")
         info = ob.js("""const p = app.plugins.plugins["full-keep-mode"]; return { loaded: !!p, version: app.plugins.manifests["full-keep-mode"]?.version };""")
         print(f"Full Keep Mode {info['version']}")
