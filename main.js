@@ -701,6 +701,49 @@ function checklistExtension(plugin) {
 		provide: field => [Prec.highest(EditorView.decorations.from(field)), EditorView.atomicRanges.of(view => view.state.field(field))],
 	});
 
+	// Keep's "Note" in grey while the note has no text yet.
+	class PlaceholderWidget extends WidgetType {
+		eq() {
+			return true;
+		}
+		toDOM() {
+			return createSpan({ cls: "fkm-placeholder", text: "Note" });
+		}
+		ignoreEvent() {
+			return false;
+		}
+	}
+	const notePlaceholder = StateField.define({
+		create: state => placeholderFor(state),
+		update: (deco, tr) => (tr.docChanged ? placeholderFor(tr.state) : deco),
+		provide: field => EditorView.decorations.from(field),
+	});
+	function placeholderFor(state) {
+		if (!livePreview(state) || !enabledFor(state) || !settings().keepTitles) return Decoration.none;
+		const doc = state.doc;
+		const start = bodyStart(doc);
+		if (doc.sliceString(start).trim()) return Decoration.none;
+		return Decoration.set([Decoration.widget({ widget: new PlaceholderWidget(), side: 1 }).range(start)]);
+	}
+
+	// The note's properties (front matter, hidden like in Keep) are no text to type in:
+	// typing, Enter, Backspace or a paste never change them, and the cursor never goes
+	// there - a new line at the very start of a note used to break them open.
+	const keepPropertiesClosed = [
+		EditorState.changeFilter.of(tr => {
+			if (!tr.docChanged || !["input", "delete", "move", "drop"].some(e => tr.isUserEvent(e))) return true;
+			const start = bodyStart(tr.startState.doc);
+			return start > 0 ? [0, start - 1] : true;
+		}),
+		EditorState.transactionFilter.of(tr => {
+			if (!tr.selection || !enabledFor(tr.state)) return tr;
+			const start = bodyStart(tr.newDoc);
+			if (!start || tr.selection.ranges.every(r => r.from >= start)) return tr;
+			const ranges = tr.selection.ranges.map(r => EditorSelection.range(Math.max(r.anchor, start), Math.max(r.head, start)));
+			return [tr, { selection: EditorSelection.create(ranges, tr.selection.mainIndex), sequential: true }];
+		}),
+	];
+
 	// The item the cursor is in (its first line), for Keep's ×.
 	const currentItem = StateField.define({
 		create: state => markCurrent(state),
@@ -1302,7 +1345,7 @@ ${pad(depth)}${bullet} [${mark}] `;
 		}
 	});
 
-	return [decorations, currentItem, keepCursorOut, selectAllInItem, tapToItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
+	return [decorations, currentItem, notePlaceholder, keepPropertiesClosed, keepCursorOut, selectAllInItem, tapToItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
 }
 
 // ----- settings tab -------------------------------------------------------------------------
@@ -1807,39 +1850,43 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		}
 	}
 
-	// Notes imported from Keep keep their real title in keep_title when the file name
-	// can't hold it ("Sept/Oct 2026" is saved as "SeptOct 2026"). Show that title
-	// instead of the file name; editing it updates keep_title and renames the file.
+	// The note's title, like Keep's: a field of its own above the text, in place of
+	// Obsidian's title (which is the file name, so it can't hold characters like "/" or
+	// ":", and shows "Untitled" for a new note). Empty, it shows "Title" in grey. The
+	// title is kept in keep_title; the file name follows it, without the characters a
+	// file name can't have.
 	renderTitle(view) {
 		const sizer = view.contentEl.querySelector(".markdown-source-view .cm-sizer");
-		const inline = sizer?.querySelector(":scope > .inline-title");
+		const inline = sizer?.querySelector(":scope > .inline-title:not(.fkm-title)");
 		const old = sizer?.querySelector(":scope > .fkm-title");
 		const file = view.file;
-		const title = file ? this.frontmatterOf(file)[TITLE_PROPERTY] : null;
-		const show = this.settings.keepTitles && inline && typeof title === "string" && title.trim() && title !== file.basename;
-		if (!show) {
+		if (!this.settings.keepTitles || !inline || !(file instanceof obsidian.TFile) || file.extension !== "md") {
 			old?.remove();
 			sizer?.removeClass("fkm-has-title");
 			return;
 		}
+		const title = this.titleOf(file);
 		sizer.addClass("fkm-has-title");
-		const el = old ?? createDiv({ cls: "fkm-title inline-title", attr: { contenteditable: "true", spellcheck: "false" } });
+		const el = old ?? createDiv({ cls: "fkm-title inline-title", attr: { contenteditable: "plaintext-only", spellcheck: "false", "data-placeholder": "Title" } });
 		if (!old) {
 			inline.before(el);
 			el.addEventListener("keydown", event => {
 				if (event.key === "Enter") {
 					event.preventDefault();
-					// Like Obsidian's own title: Enter goes on to the note's text.
+					// Enter goes on to the note's text, like in Keep.
 					const cm = view.editor?.cm;
 					if (cm) {
-						const start = bodyStart(cm.state.doc);
 						cm.focus();
-						cm.dispatch({ selection: { anchor: start } });
+						cm.dispatch({ selection: { anchor: bodyStart(cm.state.doc) } });
 					}
 				} else if (event.key === "Escape") {
-					el.textContent = this.frontmatterOf(view.file)[TITLE_PROPERTY] ?? view.file.basename;
+					el.textContent = this.titleOf(view.file);
 					el.blur();
 				}
+			});
+			// Plain text only: a pasted title brings no formatting or line breaks.
+			el.addEventListener("input", () => {
+				if (el.textContent.includes("\n")) el.textContent = el.textContent.replace(/\s*\n\s*/g, " ");
 			});
 			el.addEventListener("blur", () => void this.setTitle(view.file, el.textContent));
 		}
@@ -1853,9 +1900,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 	async setTitle(file, text) {
 		const title = text.replace(/\s+/g, " ").trim();
-		if (!file || !title || title === this.frontmatterOf(file)[TITLE_PROPERTY]) return;
+		if (!file || title === this.titleOf(file)) return;
 		await this.app.fileManager.processFrontMatter(file, fm => {
-			fm[TITLE_PROPERTY] = title;
+			fm[TITLE_PROPERTY] = title; // "" = no title (the file keeps its name)
 		});
 		const name = this.safeName(title);
 		if (name && name !== file.basename) {
@@ -2389,7 +2436,11 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			} else {
 				const run = (this.searchRun = (this.searchRun ?? 0) + 1);
 				const matches = new Set();
-				for (const file of this.app.vault.getMarkdownFiles()) {
+				// Only the notes on the boards: a search shows nothing else, and reading every
+				// note of a big vault made it slow.
+				const onBoards = new Set();
+				for (const board of this.boards) for (const entry of board.data?.data ?? []) if (entry.file) onBoards.add(entry.file);
+				for (const file of onBoards.size ? onBoards : this.app.vault.getMarkdownFiles()) {
 					const haystack = [this.titleOf(file), file.basename, ...this.labelsOf(file), await this.app.vault.cachedRead(file)]
 						.join("\n").toLowerCase();
 					if (words.every(word => haystack.includes(word))) matches.add(file.path);
@@ -3265,13 +3316,22 @@ class NoteModal extends obsidian.Modal {
 		try {
 			this.leaf = this.plugin.takePopupLeaf();
 			content.appendChild(this.leaf.containerEl);
-			await this.leaf.openFile(this.file, { state: { mode: "source" }, eState: this.isNew ? { rename: "all" } : {} });
+			await this.leaf.openFile(this.file, { state: { mode: "source" } });
 			this.plugin.renderButtons(this.file); // title, colour, labels: right away
 		} catch (err) {
 			console.error("[Full Keep Mode] Couldn't open the note:", err);
 			content.createEl("p", { text: "Couldn't open the editor." });
 		}
 		content.removeClass("fkm-loading");
+		if (this.isNew) {
+			// Ready to type, like Keep: the cursor in the note's text (or its first item) -
+			// once the pop-up is visible (something invisible can't take the cursor).
+			const cm = this.leaf?.view?.editor?.cm;
+			if (cm) {
+				cm.focus();
+				cm.dispatch({ selection: { anchor: cm.state.doc.length } });
+			}
+		}
 	}
 
 	// Phones: Keep's back arrow (top left) instead of the close button.

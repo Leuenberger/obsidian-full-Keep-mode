@@ -476,6 +476,22 @@ def main():
         time.sleep(0.6)
         check("the drop line is midway between the items (within a pixel)", abs(mid["line"] - mid["midway"]) <= 1.0, mid)
 
+        # The note's properties: no text to type in. Enter at the very start of the note,
+        # Backspace there, or a cursor put in front of them changes nothing up there.
+        open_note("properties closed", "---\nkeep_color: blue\n---\n- [ ] A\n")
+        prop = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; cm.focus();
+            cm.dispatch({ selection: { anchor: 0 } }); await wait(200);
+            return cm.state.selection.main.head === cm.state.doc.toString().indexOf('- [ ] A') || cm.state.doc.sliceString(cm.state.selection.main.head - 1, cm.state.selection.main.head + 1);""")
+        key("Home", 36)
+        ob.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text="\r", unmodifiedText="\r")
+        ob.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+        time.sleep(0.3)
+        key("Backspace", 8)
+        key("Backspace", 8)
+        after = text()
+        check("the note's properties can't be typed into (Enter or Backspace at the start, a cursor put in front)",
+              after.startswith("---\nkeep_color: blue\n---\n") and prop is not False, repr(after))
+
         print("Keep-style editing")
         open_note("editing", "---\ntags:\n  - Shopping\nkeep_created: 2024-11-10T02:44:02\n---\n- [ ] Alpha\n- [ ] Beta\n→- [x] Gamma\n".replace("→", "\t"))
         boxes = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc;
@@ -778,25 +794,47 @@ def main():
             press_escape()
             ob.js(PRELUDE + "app.workspace.revealLeaf(window.__fkmBoard); app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(800);")
 
-            # "Take a note…": an untouched new note is thrown away, one with text stays.
+            # "Take a note…": like Keep, an empty "Title" and "Note", the cursor ready in the
+            # note; a title can have any characters; untouched, the note is thrown away.
+            # (The new note is the one in the open "new note" pop-up - never "the newest file",
+            # which could be one of the user's.)
+            new_note = """const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].find(m => m.isNew);"""
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note').click(); await wait(1500);")
-            new_path = ob.js("""const m = document.querySelector('.fkm-new-note-modal');
-                const t = m?.querySelector('.inline-title, .view-header-title'); return m ? (t?.textContent ?? '') : null;""")
-            check("\"Take a note…\" opens a new note in the pop-up", new_path is not None, new_path)
-            path = ob.js("""const files = app.vault.getMarkdownFiles().sort((a, b) => b.stat.ctime - a.stat.ctime);
-                return files[0]?.path;""")
+            fresh = ob.js(PRELUDE + new_note + """ if (!m) return null; await wait(300);
+                const el = m.modalEl; const cm = m.leaf.view.editor.cm; const title = el.querySelector('.fkm-title');
+                const obsidianTitle = el.querySelector('.inline-title:not(.fkm-title)');
+                return { path: m.file.path, title: title?.textContent, placeholder: title && getComputedStyle(title, '::before').content,
+                    obsidianTitle: obsidianTitle ? getComputedStyle(obsidianTitle).display : 'none',
+                    note: el.querySelector('.fkm-placeholder')?.textContent ?? null, focused: cm.hasFocus };""")
+            check("\"Take a note…\" opens a new note in the pop-up: empty \"Title\" and \"Note\", the cursor ready",
+                  fresh is not None and fresh["title"] == "" and fresh["placeholder"] == '"Title"' and fresh["obsidianTitle"] == "none"
+                  and fresh["note"] == "Note" and fresh["focused"] is True, fresh)
             press_escape()
-            gone = ob.js(f"return !app.vault.getAbstractFileByPath({json.dumps(path)});")
-            check("…which is thrown away when closed untouched", gone, path)
+            gone = ob.js(f"return !app.vault.getAbstractFileByPath({json.dumps(fresh and fresh['path'])});")
+            check("…which is thrown away when closed untouched", gone, fresh)
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note').click(); await wait(1500);")
-            path = ob.js("""const files = app.vault.getMarkdownFiles().sort((a, b) => b.stat.ctime - a.stat.ctime);
-                return files[0]?.path;""")
-            ob.js(PRELUDE + f"""await app.vault.modify(app.vault.getAbstractFileByPath({json.dumps(path)}), 'Milk');
-                await wait(800);""")
+            box = ob.js(PRELUDE + new_note + """ const r = m.modalEl.querySelector('.fkm-title').getBoundingClientRect();
+                return { x: r.left + 20, y: r.top + r.height / 2, path: m.file.path };""")
+            ob.mouse("mouseMoved", box["x"], box["y"], 0)
+            ob.mouse("mousePressed", box["x"], box["y"])
+            ob.mouse("mouseReleased", box["x"], box["y"], 0)
+            time.sleep(0.3)
+            ob.call("Input.insertText", text="Sept/Oct: 50%?")
+            time.sleep(0.3)
+            ob.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text="\r", unmodifiedText="\r")
+            ob.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+            time.sleep(1.2)
+            ob.call("Input.insertText", text="Milk")
+            time.sleep(1)
+            named = ob.js(PRELUDE + new_note + """ await wait(300); return { path: m.file.path, title: app.metadataCache.getFileCache(m.file)?.frontmatter?.keep_title,
+                text: m.leaf.view.editor.getValue() };""")
+            check("…a title with any characters (it's kept as written; the file name leaves out what it can't have)",
+                  named["title"] == "Sept/Oct: 50%?" and named["path"].endswith("SeptOct 50%.md"), named)
+            check("…Enter in the title goes on to the note's text", named["text"].endswith("Milk"), named)
             press_escape()
-            kept = ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(path)}); return f ? await app.vault.read(f) : null;")
-            check("…and kept when it has text", kept == "Milk", kept)
-            ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(path)}); if (f) await app.vault.trash(f, true);")
+            kept = ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(named['path'])}); return f ? await app.vault.read(f) : null;")
+            check("…and a note with text is kept", kept is not None and kept.endswith("Milk"), kept)
+            ob.js(f"const f = app.vault.getAbstractFileByPath({json.dumps(named['path'])}); if (f) await app.vault.trash(f, true);")
 
             # Search bar, labels and "New list".
             order = ob.js("""const el = window.__fkmBoard.view.containerEl;

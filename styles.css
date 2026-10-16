@@ -1279,3 +1279,17 @@ body:not(.is-mobile) .cm-line.fkm-item:hover .fkm-delete {
 	display: inline-block;
 	white-space: pre;
 }
+
+/* ===== Keep's grey "Title" and "Note" while they're empty ===== */
+.fkm-title:empty::before {
+	content: attr(data-placeholder);
+	color: var(--text-faint);
+	pointer-events: none;
+}
+
+.fkm-placeholder {
+	color: var(--text-faint);
+	pointer-events: none;
+	-webkit-user-select: none;
+	user-select: none;
+}
