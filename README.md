@@ -176,7 +176,7 @@ labels). The board is an Obsidian Bases file (`.base`) with views of type
 <details>
 <summary><b>Development</b></summary>
 
-There's no build step: `main.js` is the plugin as it ships. The tests in
+There's no build step: `main.js` is the plugin as it ships. The tests run in a vault of their own, never in one with real notes: create an empty vault named "Full Keep Mode test vault" with the plugin installed, and keep it open in Obsidian (they refuse to run anywhere else). The tests in
 `tests/live_test.py` run against a real Obsidian, with real mouse and key
 events:
 

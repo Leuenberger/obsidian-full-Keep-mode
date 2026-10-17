@@ -97,7 +97,7 @@ def main():
         m = js(CM + """const modal = document.querySelector('.fkm-note-modal');
             const T = modal.querySelector('.fkm-title, .inline-title:not([style*="none"])').getBoundingClientRect().left;
             const textX = l => { const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n;
-                while ((n = w.nextNode())) { if (n.parentElement.closest('.fkm-prefix')) continue; const r = document.createRange(); r.setStart(n, 0); r.setEnd(n, 1); return r.getBoundingClientRect(); } };
+                while ((n = w.nextNode())) { if (n.parentElement.closest('.fkm-prefix')) continue; const i = n.textContent.search(/\\S/); if (i < 0) continue; const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1); return r.getBoundingClientRect(); } };
             const r1 = n => Math.round(n);
             return [...cm.contentDOM.querySelectorAll('.cm-line.fkm-task, .cm-line.fkm-extra')].map(l => {
                 const b = l.querySelector('input')?.getBoundingClientRect(); const g = l.querySelector('.fkm-grip svg')?.getBoundingClientRect(); const x = textX(l);
@@ -113,12 +113,12 @@ def main():
         r = js(CM + """const out = {};
             out.textFirst = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-task, .cm-line.fkm-extra')].every(l => {
                 const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n;
-                while ((n = w.nextNode())) { if (n.parentElement.closest('.fkm-prefix, .fkm-extra-spacer')) continue; return /\\S/.test(n.textContent[0]); } return true; });
+                while ((n = w.nextNode())) { if (n.parentElement.closest('.fkm-prefix, .fkm-extra-spacer, .fkm-gap')) continue; return /\\S/.test(n.textContent[0]); } return true; });
             out.editable = [...cm.contentDOM.querySelectorAll('.fkm-prefix')].some(p => p.isContentEditable);
             const d = cm.state.doc.toString(); const sub = cm.state.doc.line(d.split('\\n').indexOf('\\t- [ ] Sub one') + 1);
             out.cursor = [0, 1, 3, 6, 7].map(o => { cm.dispatch({ selection: { anchor: sub.from + o } }); const h = cm.state.selection.main.head; return d.slice(h, h + 3); });
             return out;""")
-        lt.check("nothing in front of an item's text is text (indent, grip, checkbox)", r["textFirst"] and not r["editable"], r)
+        lt.check("nothing in front of an item's text is text (indent, grip, checkbox), but the one space after the checkbox", r["textFirst"] and not r["editable"], r)
         lt.check("a cursor anywhere in front of an item's text goes to its text", r["cursor"] == ["Sub"] * 5, r["cursor"])
 
         def select_all(how, at="Sub one"):
@@ -183,7 +183,7 @@ def main():
             return js(CM + f"""const l = [...cm.contentDOM.querySelectorAll('.cm-line')].find(l => l.textContent.includes('Sub one'));
                 const box = l.querySelector('input').getBoundingClientRect();
                 const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n, x = null;
-                while ((n = w.nextNode())) {{ if (n.parentElement.closest('.fkm-prefix')) continue; const r = document.createRange(); r.setStart(n, 0); r.setEnd(n, 1); x = r.getBoundingClientRect().left; break; }}
+                while ((n = w.nextNode())) {{ if (n.parentElement.closest('.fkm-prefix')) continue; const i = n.textContent.search(/\\S/); if (i < 0) continue; const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1); x = r.getBoundingClientRect().left; break; }}
                 return {json.dumps(which)} === 'gap' ? {{ x: (box.right + x) / 2, y: box.top + box.height / 2 }} : {{ x: box.left + box.width / 2, y: box.top + box.height / 2 }};""")
         tap(point("gap"))
         lt.check("a tap between the checkbox and the text doesn't tick the item", "- [ ] Sub one" in body(), body())
@@ -223,7 +223,7 @@ def main():
         js(CM + "cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: " + json.dumps(empty_note) + " } }); cm.contentDOM.blur(); await wait(700);")
         def tap_empty(where):
             p = js(CM + f"""const l = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-item')][1];
-                const r = l.getBoundingClientRect(); const pre = l.querySelector('.fkm-prefix-space').getBoundingClientRect();
+                const r = l.getBoundingClientRect(); const pre = l.querySelector('input').getBoundingClientRect();
                 return {json.dumps(where)} === 'blank' ? {{ x: r.right - 80, y: r.bottom - 8 }} : {{ x: l.querySelector('input').getBoundingClientRect().right + 12, y: pre.top + pre.height / 2 }};""")
             js(CM + "cm.contentDOM.blur(); cm.dispatch({ selection: { anchor: 0 } }); await wait(300);")
             tap(p)
@@ -244,6 +244,44 @@ def main():
                     for (const b of r.getClientRects()) if (b.right > x.left + 1 && b.top < x.bottom && b.bottom > x.top) overlap = true; } }
             return overlap;""")
         lt.check("long text wraps before the x, never under it", over is False, over)
+        reset()
+
+        # A tap right of an item's text: the cursor at the end of that text (not in the next
+        # item). A tap on an empty item that already has the cursor is the phone's own (its
+        # Paste menu), the plugin leaves it alone.
+        reset()
+        right = js(CM + """cm.contentDOM.blur(); await wait(200);
+            const l = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-item')].find(l => l.textContent.includes('Top one'));
+            const r = l.getBoundingClientRect(); return { x: r.right - 70, y: r.bottom - 10 };""")
+        tap(right)
+        at = js(CM + "const h = cm.state.selection.main.head; const line = cm.state.doc.lineAt(h); return { line: line.text, atEnd: h === line.to, focused: cm.hasFocus };")
+        lt.check("a tap right of an item's text puts the cursor at the end of that text", at == {"line": "- [ ] Top one", "atEnd": True, "focused": True}, at)
+        empty_note = "---" + chr(10) + "keep_color: blue" + chr(10) + "---" + chr(10) + "- [ ] Top one" + chr(10) + "- [ ] " + chr(10) + "- [ ] Top two" + chr(10)
+        js(CM + "cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: " + json.dumps(empty_note) + " } }); await wait(500);"
+           + " cm.focus(); const d = cm.state.doc.toString(); const l = cm.state.doc.line(d.split(String.fromCharCode(10)).indexOf('- [ ] ') + 1); cm.dispatch({ selection: { anchor: l.to } }); await wait(300);"
+           + " window.__tapPrevented = null; if (!window.__tapHook) { window.__tapHook = 1; document.addEventListener('touchend', e => { window.__tapPrevented = e.defaultPrevented; }, false); } return 1;")
+        spot = js(CM + """const l = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-item')][1]; const r = l.getBoundingClientRect();
+            return { x: r.left + 140, y: r.bottom - 10 };""")
+        tap(spot)
+        own = js(CM + "const h = cm.state.selection.main.head; return { prevented: window.__tapPrevented, line: cm.state.doc.lineAt(h).text, focused: cm.hasFocus };")
+        lt.check("a tap on an empty item that has the cursor is the phone's own (Paste menu); the cursor stays there",
+                 own == {"prevented": False, "line": "- [ ] ", "focused": True}, own)
+        reset()
+
+        # A link in the pop-up opens the linked note in the pop-up; the back arrow returns.
+        js(PRE + f"""const other = {json.dumps(F)} + "/Linked.md"; if (!app.vault.getAbstractFileByPath(other)) await app.vault.create(other, "- [ ] Linked item" + String.fromCharCode(10)); return 1;""")
+        link_note = "---" + chr(10) + "keep_color: blue" + chr(10) + "---" + chr(10) + "See [[Linked]] here" + chr(10) + "- [ ] Top one" + chr(10)
+        js(CM + "cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: " + json.dumps(link_note) + " } }); cm.contentDOM.blur(); await wait(800); return 1;")
+        lk = js(CM + """const el = [...cm.contentDOM.querySelectorAll('.cm-hmd-internal-link, .internal-link')].find(e => e.textContent.includes('Linked'));
+            if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };""")
+        if lk:
+            tap(lk)
+            time.sleep(1)
+        shown = js(PRE + "const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].pop(); return m ? m.leaf.view.file.basename : null;")
+        lt.check("a tapped link opens the linked note in the pop-up", lk is not None and shown == "Linked", (lk, shown))
+        js(PRE + "document.querySelector('.fkm-note-modal .fkm-back-button')?.click(); await wait(1000); return 1;")
+        back = js(PRE + "const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].pop(); return m ? m.leaf.view.file.basename : null;")
+        lt.check("…and the back arrow returns to the note with the link", back == "Phone", back)
         reset()
 
         print("Swiping")

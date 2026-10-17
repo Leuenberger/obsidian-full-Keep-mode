@@ -15,6 +15,7 @@ Mouse drags use real input events, so keep the Obsidian window visible.
 """
 import itertools
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -23,12 +24,19 @@ import websocket
 
 PORT = 9222
 FOLDER = "Full Keep Mode tests"
+# The tests run in a vault of their own, never in a vault with real notes: open it in
+# Obsidian next to yours (its window title names it). FKM_VAULT picks another one.
+VAULT = os.environ.get("FKM_VAULT", "Full Keep Mode test vault")
 
 
 class Obsidian:
     def __init__(self):
         pages = json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/list"))
-        page = next(p for p in pages if p["type"] == "page" and p["url"].startswith("app://obsidian.md"))
+        windows = [p for p in pages if p["type"] == "page" and p["url"].startswith("app://obsidian.md")]
+        page = next((p for p in windows if f" - {VAULT} - Obsidian" in p["title"]), None)
+        if page is None:
+            raise SystemExit(f'The vault "{VAULT}" is not open in Obsidian (open: {[p["title"] for p in windows]}). '
+                             "The tests only run in their own vault, so they can't touch real notes.")
         self.ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=60, suppress_origin=True)
         self.ids = itertools.count(1)
 
@@ -119,10 +127,17 @@ def click_checkbox(label):
 
 
 def drag(label, dx, target=None, lower=True):
-    g = ob.js(line_el(label) + """
-    const g = el.querySelector(".fkm-grip").getBoundingClientRect();
-    return { x: g.left + g.width / 2, y: g.top + g.height / 2 };
-    """)
+    # Where the grip is once it has settled (the plugin places it a moment after drawing).
+    g = None
+    for _ in range(20):
+        now = ob.js(line_el(label) + """
+        const g = el.querySelector(".fkm-grip").getBoundingClientRect();
+        return { x: g.left + g.width / 2, y: g.top + g.height / 2 };
+        """)
+        if now == g:
+            break
+        g = now
+        time.sleep(0.15)
     x, y = g["x"], g["y"]
     ty = y
     if target:
@@ -276,6 +291,14 @@ def main():
         check("one undo restores the list exactly", body() == start.replace("\t", "→"), body())
         click_checkbox("B")
         check("ticking a parent ticks its sub-items and moves them along", body() == "- [ ] A\n- [ ] C\n- [x] B\n→- [x] B1", body())
+        open_note("untick place", HEAD + "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D")
+        click_checkbox("B")
+        moved_down = body()
+        click_checkbox("B")
+        check("unticking an item puts it back where it was, like Keep", (moved_down, body()) == ("- [ ] A\n- [ ] C\n- [ ] D\n- [x] B", "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D"), (moved_down, body()))
+        click_checkbox("A")
+        click_checkbox("A")
+        check("…also the first item (back to the top)", body() == "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D", body())
 
         print("Ghost parents")
         open_note("ghosts", HEAD + "- [ ] P\n\t- [ ] P1\n\t- [ ] P2\n- [ ] Q")
@@ -795,6 +818,42 @@ def main():
                 return { active, popup: !!document.querySelector('.fkm-note-modal') };""")
             check("a reminder's \"Open\" shows the note popped up over the board", opened == {"active": "bases", "popup": True}, opened)
             press_escape()
+
+            # A link in a pop-up opens the linked note in the pop-up (not in the board's tab
+            # behind it); back returns to the first note, then to the board.
+            ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card B.md');
+                await app.vault.modify(f, (await app.vault.read(f)) + '\\nSee [[Card C]] too\\n'); await wait(800);
+                app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(300);
+                // The moment the pop-up appears, its note is already there (it never slides in empty).
+                window.__appeared = null;
+                const watch = new MutationObserver(() => { const m = document.querySelector('.fkm-note-modal');
+                    if (m && window.__appeared === null) window.__appeared = m.querySelectorAll('.cm-line').length; });
+                watch.observe(document.body, { childList: true, subtree: true }); window.__watch = watch;
+                [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md')).querySelector('.fkm-card-title').click();
+                await wait(1500); watch.disconnect();""")
+            appeared = ob.js("return window.__appeared;")
+            check("a note's pop-up appears with the note already in it (never empty)", isinstance(appeared, int) and appeared > 0, appeared)
+            link = ob.js("""const m = [...document.querySelectorAll('.fkm-note-modal')].pop();
+                const el = [...m.querySelectorAll('.cm-hmd-internal-link, .internal-link')].find(e => e.textContent.includes('Card C'));
+                if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };""")
+            if link:
+                ob.mouse("mouseMoved", link["x"], link["y"], 0)
+                ob.mouse("mousePressed", link["x"], link["y"])
+                ob.mouse("mouseReleased", link["x"], link["y"], 0)
+                time.sleep(1.5)
+            where = lambda: ob.js("""const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].pop();
+                return { popup: m ? m.leaf.view.file.basename : null, board: window.__fkmBoard.view.getViewType() };""")
+            followed = where()
+            check("a link in a pop-up opens the linked note in the pop-up; the board stays", link is not None and followed == {"popup": "Card C", "board": "bases"}, (link, followed))
+            def escape_once():
+                ob.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+                ob.call("Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+                time.sleep(1)
+            escape_once()
+            back = where()
+            escape_once()
+            closed = where()
+            check("…back returns to the note with the link, then to the board", (back, closed) == ({"popup": "Card B", "board": "bases"}, {"popup": None, "board": "bases"}), (back, closed))
             ob.js(PRELUDE + "app.workspace.revealLeaf(window.__fkmBoard); app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(800);")
 
             # "Take a note…": like Keep, an empty "Title" and "Note", the cursor ready in the

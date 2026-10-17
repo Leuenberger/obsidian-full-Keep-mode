@@ -1074,7 +1074,13 @@ body:not(.is-phone) .fkm-note-modal .view-header {
 
 /* The pop-up's editor, kept for the next note. */
 .fkm-popup-holder {
-	display: none;
+	position: fixed;
+	left: -10000px;
+	top: 0;
+	width: min(800px, 100vw);
+	height: 100vh;
+	visibility: hidden;
+	pointer-events: none;
 }
 
 /* ===== Phones ===== */
@@ -1274,10 +1280,12 @@ body:not(.is-mobile) .cm-line.fkm-item:hover .fkm-delete {
 	color: var(--checklist-done-color, var(--text-muted));
 }
 
-/* The space after the checkbox isn't struck through with a ticked item's text. */
-.fkm-prefix-space {
+/* The space after the checkbox (real text, so the cursor always has a place) isn't
+   struck through with a ticked item's text. */
+.fkm-gap {
 	display: inline-block;
 	white-space: pre;
+	text-decoration: none;
 }
 
 /* ===== Keep's grey "Title" and "Note" while they're empty ===== */
@@ -1292,4 +1300,10 @@ body:not(.is-mobile) .cm-line.fkm-item:hover .fkm-delete {
 	pointer-events: none;
 	-webkit-user-select: none;
 	user-select: none;
+}
+
+/* Keep has no folding: Obsidian's fold arrow ("Fold indent", on by default) would sit
+   right over an item's grip and catch the presses meant for it. */
+.cm-line.fkm-item .cm-fold-indicator {
+	display: none;
 }

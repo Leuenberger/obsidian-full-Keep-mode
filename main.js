@@ -49,6 +49,7 @@ const DEFAULT_SETTINGS = {
 	labelsSidebar: true, // Keep's side menu: Notes, Reminders, labels, Archive
 	dragCards: true,
 	firedReminders: {}, // path -> reminder time already shown (so each one fires once)
+	tickPlaces: {}, // path -> ticked item -> the unticked item it was after (Keep puts it back there)
 	firstUsed: 0, // when the plugin was first used, for asking once for a star on GitHub
 	importedAt: 0, // when notes were last imported from Keep (the star is asked a week later)
 	starAsked: false,
@@ -461,12 +462,32 @@ function checklistExtension(plugin) {
 				event.preventDefault();
 				tickAt(view, el);
 			});
-			el.createSpan({ cls: "fkm-prefix-space", text: " " });
+			// Keep's x, at the right of the line (placed by styles.css).
+			const x = el.createSpan({ cls: "fkm-delete clickable-icon", attr: { "aria-label": "Delete" } });
+			obsidian.setIcon(x, "x");
+			x.addEventListener("mousedown", event => {
+				event.preventDefault(); // neither the cursor nor the keyboard moves
+				event.stopPropagation();
+			});
+			x.addEventListener("click", event => {
+				event.preventDefault();
+				event.stopPropagation();
+				deleteItemAt(view, el);
+			});
+			x.addEventListener("touchstart", event => {
+				if (event.cancelable) event.preventDefault();
+				event.stopPropagation();
+			}, { passive: false });
+			x.addEventListener("touchend", event => {
+				if (event.cancelable) event.preventDefault();
+				event.stopPropagation();
+				deleteItemAt(view, el);
+			}, { passive: false });
 			// Tappable itself, so a phone keeps a tap next to the checkbox where it is,
 			// instead of moving it onto the checkbox (phones move taps onto the nearest
 			// tappable thing). The tap puts the cursor at the item's text (tapToItem).
 			el.addEventListener("click", event => {
-				if (!event.target.closest("input, .fkm-grip")) event.preventDefault();
+				if (!event.target.closest("input, .fkm-grip, .fkm-delete")) event.preventDefault();
 			});
 			return el;
 		}
@@ -497,35 +518,6 @@ function checklistExtension(plugin) {
 		view.dispatch({ changes: { from, to }, selection: { anchor: from }, userEvent: "delete", scrollIntoView: false });
 		restoreScroll();
 	};
-	class DeleteWidget extends WidgetType {
-		eq() {
-			return true;
-		}
-		toDOM(view) {
-			const el = createSpan({ cls: "fkm-delete clickable-icon", attr: { "aria-label": "Delete" } });
-			obsidian.setIcon(el, "x");
-			// Neither the cursor nor the keyboard moves; the item just goes.
-			el.addEventListener("mousedown", event => event.preventDefault());
-			el.addEventListener("click", event => {
-				event.preventDefault();
-				deleteItemAt(view, el);
-			});
-			el.addEventListener("touchstart", event => {
-				if (event.cancelable) event.preventDefault();
-				event.stopPropagation();
-			}, { passive: false });
-			el.addEventListener("touchend", event => {
-				if (event.cancelable) event.preventDefault();
-				event.stopPropagation();
-				deleteItemAt(view, el);
-			}, { passive: false });
-			return el;
-		}
-		ignoreEvent() {
-			return true;
-		}
-	}
-
 	// Source mode: the raw "- [ ]" stays text, with a grip in front of it.
 	class GripWidget extends WidgetType {
 		eq() {
@@ -652,14 +644,17 @@ function checklistExtension(plugin) {
 				const head = doc.line(item.line);
 				const boxFrom = head.from + item.indent.length;
 				if (live) {
-					const prefixTo = Math.min(boxFrom + 6, head.to); // "- [ ] "
+					// "- [ ]"; the space after it stays text: the line always has text the cursor can
+					// be in (an empty item too), right where the item's text starts.
+					const prefixTo = Math.min(boxFrom + 5, head.to);
 					decos.push(Decoration.replace({ widget: new PrefixWidget(item.mark, item.depth, s.dragHandles) }).range(head.from, prefixTo));
+					// That space isn't struck through with a ticked item's text.
+					if (head.to > prefixTo) decos.push(Decoration.mark({ class: "fkm-gap" }).range(prefixTo, prefixTo + 1));
 				} else if (s.dragHandles) {
 					// After the indentation, so the grip floats right next to the checkbox.
 					decos.push(Decoration.widget({ widget: new GripWidget(), side: -1 }).range(boxFrom));
 				}
 				if (live) {
-					decos.push(Decoration.widget({ widget: new DeleteWidget(), side: 1 }).range(head.to));
 					decos.push(Decoration.line({ class: "fkm-item" }).range(head.from));
 				}
 				if (!s.alignExtraLines) return;
@@ -990,7 +985,7 @@ ${pad(depth)}${bullet} [${mark}] `;
 					items[i].mark = items[index].checked ? (items[i].checked && items[i].mark !== " " ? items[i].mark : "x") : " ";
 				}
 			}
-			writeItems(view, block, s.sinkTicked ? sinkItems(items) : items, unit);
+			writeItems(view, block, plugin.orderAfterTick(fileOf(view.state)?.path, items, index), unit);
 		}, 0);
 	});
 
@@ -1289,10 +1284,9 @@ ${pad(depth)}${bullet} [${mark}] `;
 		}
 	});
 
-	// A tap or click on a checklist line where there's no text to put the cursor in -
-	// the indentation, the space next to the checkbox, an empty item's line - puts the
-	// cursor at the start of the item's text, like in Keep. (An empty item's line holds
-	// no text at all, so a phone otherwise can't put the cursor in it.)
+	// A tap or click on the piece in front of an item's text (its indentation, the gap
+	// next to the checkbox) puts the cursor at the start of the item's text, like in Keep.
+	// Taps on the text or the rest of the line are the phone's own (cursor, Paste menu).
 	const cursorToItem = (view, el) => {
 		const line = view.state.doc.lineAt(view.posAtDOM(el));
 		const at = textStart(view.state.doc, line) ?? line.to;
@@ -1304,9 +1298,7 @@ ${pad(depth)}${bullet} [${mark}] `;
 		if (target.closest?.(".fkm-grip, input, .fkm-delete")) return null;
 		const line = target.closest?.(".cm-line.fkm-item, .cm-line.fkm-extra");
 		if (!line) return null;
-		if (target.closest(".fkm-prefix, .fkm-extra-spacer")) return line;
-		// The line itself (not its text): only if the item has no text there.
-		return target === line && !line.textContent.trim() ? line : null;
+		return target.closest(".fkm-prefix, .fkm-extra-spacer") ? line : null;
 	};
 	// On the editor's element itself: the editor doesn't pass on events from its non-text
 	// pieces (the prefix, the spacer).
@@ -1507,6 +1499,22 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			};
 			this.register(() => { indentCommand.editorCallback = original; });
 		}
+
+		// Links in a pop-up's note open in the pop-up (see NoteModal.openLink), not in the tab
+		// behind it. With a modifier key (new tab, split) Obsidian decides, as usual.
+		const workspace = this.app.workspace;
+		const openLinkText = workspace.openLinkText;
+		const plugin = this;
+		const openInPopup = function (linktext, sourcePath, newLeaf, state) {
+			const popup = !newLeaf && [...(plugin.openNotes ?? [])].find(m => m.leaf?.view?.file?.path === sourcePath
+				&& !m.containerEl.hasClass("fkm-hidden") && m.containerEl.isConnected);
+			if (popup) return popup.openLink(linktext, sourcePath, state);
+			return openLinkText.apply(this, arguments);
+		};
+		workspace.openLinkText = openInPopup;
+		this.register(() => {
+			if (workspace.openLinkText === openInPopup) workspace.openLinkText = openLinkText;
+		});
 
 		// Keep's side menu, and its entries in the note's "⋮" menu.
 		this.registerView(LABELS_VIEW, leaf => new LabelsView(leaf, this));
@@ -2631,6 +2639,57 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 	// Tick or untick a checklist item from a card, like Keep: sub-items follow, and
 	// ticked items move down (the same rules as in the editor).
+	// The order after ticking or unticking items[index]: ticked items go down, and like
+	// Keep, an unticked item goes back to where it was before it was ticked (remembered,
+	// on all synced devices); without that, it goes to the end of the unticked items.
+	orderAfterTick(path, items, index) {
+		if (!this.settings.sinkTicked) return items;
+		const item = items[index];
+		const base = baseDepth(items);
+		const sorted = sinkItems(items);
+		if (!path || item.depth !== base || !item.text.trim()) return sorted;
+		const places = (this.settings.tickPlaces ??= {});
+		const key = item.text.trim();
+		if (item.checked) {
+			let after = null;
+			for (let i = index - 1; i >= 0; i--) {
+				if (items[i].depth === base && !items[i].checked) {
+					after = items[i].text.trim();
+					break;
+				}
+			}
+			(places[path] ??= {})[key] = after;
+			this.saveTickPlaces();
+			return sorted;
+		}
+		if (!places[path] || !(key in places[path])) return sorted;
+		const after = places[path][key];
+		delete places[path][key];
+		if (!Object.keys(places[path]).length) delete places[path];
+		this.saveTickPlaces();
+		const from = sorted.indexOf(item);
+		const moved = sorted.splice(from, descendantsEnd(sorted, from) - from);
+		let at = 0;
+		if (after !== null) {
+			const anchor = sorted.findIndex(i => i.depth === base && !i.checked && i.text.trim() === after);
+			if (anchor < 0) {
+				sorted.splice(from, 0, ...moved); // the item it was after is gone
+				return sorted;
+			}
+			at = descendantsEnd(sorted, anchor);
+		}
+		sorted.splice(at, 0, ...moved);
+		return sorted;
+	}
+
+	saveTickPlaces() {
+		const places = this.settings.tickPlaces;
+		const paths = Object.keys(places);
+		for (const path of paths.slice(0, Math.max(0, paths.length - 300))) delete places[path];
+		window.clearTimeout(this.tickPlacesTimer);
+		this.tickPlacesTimer = window.setTimeout(() => void this.saveSharedSettings(), 1000);
+	}
+
 	async tickInFile(file, bodyLine) {
 		const unit = indentUnit(this.app);
 		const s = this.settings;
@@ -2650,7 +2709,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				items[i].checked = checked;
 				items[i].mark = checked ? "x" : " ";
 			}
-			const out = (s.sinkTicked ? sinkItems(items) : items).map(item => renderItem(item, unit)).join("\n");
+			const out = this.orderAfterTick(file.path, items, index).map(item => renderItem(item, unit)).join("\n");
 			lines.splice(block.fromLine - 1, block.toLine - block.fromLine + 1, ...out.split("\n"));
 			return lines.join("\n");
 		});
@@ -3265,16 +3324,20 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		}, 1500);
 	}
 
+	// Out of sight, but laid out like the pop-up, so the note is drawn and measured before
+	// the pop-up appears.
+	parkPopupLeaf(leaf) {
+		if (!this.popupHolder) this.popupHolder = document.body.createDiv({ cls: "fkm-popup-holder" });
+		if (leaf.containerEl.parentElement !== this.popupHolder) this.popupHolder.appendChild(leaf.containerEl);
+	}
+
 	returnPopupLeaf(leaf) {
 		if (leaf !== this.popupLeaf) {
 			leaf.detach();
 			return;
 		}
-		if (!this.popupHolder) {
-			this.popupHolder = document.body.createDiv({ cls: "fkm-popup-holder" });
-		}
 		if (leaf.containerEl.contains(document.activeElement)) document.activeElement.blur();
-		this.popupHolder.appendChild(leaf.containerEl);
+		this.parkPopupLeaf(leaf);
 		this.popupLeafBusy = false;
 	}
 
@@ -3302,36 +3365,85 @@ class NoteModal extends obsidian.Modal {
 		this.leaf = null;
 	}
 
+	// The note is loaded into the pop-up's editor first (out of sight), then the pop-up
+	// appears with it - it never slides in empty.
+	open() {
+		void this.loadThenOpen();
+	}
+
+	async loadThenOpen() {
+		try {
+			this.leaf = this.plugin.takePopupLeaf();
+			this.plugin.parkPopupLeaf(this.leaf);
+			await this.leaf.openFile(this.file, { state: { mode: "source" } });
+		} catch (err) {
+			console.error("[Full Keep Mode] Couldn't open the note:", err);
+		}
+		super.open();
+		if (this.isNew) {
+			// Ready to type, like Keep: the cursor in the note's text (or its first item) -
+			// after the pop-up has finished opening (it focuses itself as it opens).
+			window.setTimeout(() => {
+				const cm = this.leaf?.view?.editor?.cm;
+				if (!cm || !this.modalEl.isConnected) return;
+				cm.focus();
+				cm.dispatch({ selection: { anchor: cm.state.doc.length } });
+			}, 0);
+		}
+	}
+
 	async onOpen() {
 		(this.plugin.openNotes ??= new Set()).add(this); // the open pop-ups (also for tests: which note is where)
+		this.history = []; // notes this pop-up went on from through links
 		this.modalEl.addClass("fkm-note-modal");
 		if (this.isNew) this.modalEl.addClass("fkm-new-note-modal");
 		const content = this.contentEl;
 		content.empty();
-		content.addClass("fkm-loading"); // shown once complete, not half-drawn
 		if (obsidian.Platform.isPhone) {
 			this.backArrow();
 			this.swipeDownHidesKeyboard();
 		} else if (this.boardLeaf) this.fitToBoard();
-		try {
-			this.leaf = this.plugin.takePopupLeaf();
+		if (this.leaf?.view?.file) {
 			content.appendChild(this.leaf.containerEl);
-			await this.leaf.openFile(this.file, { state: { mode: "source" } });
 			this.plugin.renderButtons(this.file); // title, colour, labels: right away
-		} catch (err) {
-			console.error("[Full Keep Mode] Couldn't open the note:", err);
+		} else {
 			content.createEl("p", { text: "Couldn't open the editor." });
 		}
-		content.removeClass("fkm-loading");
-		if (this.isNew) {
-			// Ready to type, like Keep: the cursor in the note's text (or its first item) -
-			// once the pop-up is visible (something invisible can't take the cursor).
-			const cm = this.leaf?.view?.editor?.cm;
-			if (cm) {
-				cm.focus();
-				cm.dispatch({ selection: { anchor: cm.state.doc.length } });
+
+	}
+
+	// A link in the note: the linked note opens right here, in the pop-up (Obsidian would
+	// open it in the tab behind the pop-up - the board's). Back returns to this note.
+	async openLink(linktext, sourcePath, state) {
+		if (this.isNew) await this.discardIfUntouched();
+		this.history.push(this.file);
+		await this.leaf.openLinkText(linktext, sourcePath, state);
+		this.showFile(this.leaf.view?.file);
+	}
+
+	showFile(file) {
+		if (!(file instanceof obsidian.TFile)) return;
+		this.file = file;
+		this.isNew = false;
+		this.modalEl.removeClass("fkm-new-note-modal");
+		this.plugin.renderButtons(file);
+	}
+
+	// Back from a linked note; with none to go back to, the pop-up closes.
+	close() {
+		if (this.history?.length && !this.closingForGood) {
+			const previous = this.history.pop();
+			if (previous instanceof obsidian.TFile && this.app.vault.getAbstractFileByPath(previous.path)) {
+				void this.leaf.openFile(previous, { state: { mode: "source" } }).then(() => this.showFile(previous));
+				return;
 			}
 		}
+		super.close();
+	}
+
+	closeForGood() {
+		this.closingForGood = true;
+		super.close();
 	}
 
 	// Phones: Keep's back arrow (top left) instead of the close button.
@@ -3405,7 +3517,7 @@ class NoteModal extends obsidian.Modal {
 		});
 		// Its board's tab closed (or shows something else now): the pop-up goes with it.
 		this.layoutRef = this.app.workspace.on("layout-change", () => {
-			if (!board.containerEl.isConnected || !board.view?.containerEl?.querySelector(".fkm-board")) this.close();
+			if (!board.containerEl.isConnected || !board.view?.containerEl?.querySelector(".fkm-board")) this.closeForGood();
 		});
 	}
 
@@ -3417,7 +3529,11 @@ class NoteModal extends obsidian.Modal {
 		if (this.leaf) this.plugin.returnPopupLeaf(this.leaf);
 		this.leaf = null;
 		this.contentEl.empty();
-		if (!this.isNew) return;
+		if (this.isNew) await this.discardIfUntouched();
+	}
+
+	// A new note closed (or left through a link) untouched is thrown away, like in Keep.
+	async discardIfUntouched() {
 		const file = this.app.vault.getAbstractFileByPath(this.file.path);
 		if (file instanceof obsidian.TFile && file.basename === this.createdName) {
 			const text = await this.app.vault.read(file);
