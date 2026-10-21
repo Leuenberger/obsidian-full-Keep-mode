@@ -200,6 +200,19 @@ def main():
         after = js(CM + "const d = cm.state.doc.toString(); return { text: d.slice(d.lastIndexOf('---') + 4), focused: cm.hasFocus };")
         lt.check("…a tap on it deletes the item, the keyboard stays", after == {"text": "- [ ] Top one\n\t- [ ] Sub one\n\t\tsecond line\n- [ ] Top two\n", "focused": True}, after)
 
+        # The keyboard: Keep's bottom bar rises with it and stays usable right above it, the
+        # top bar stays at the top. (The phone app says how high the keyboard is in --keyboard-height.)
+        print("Keyboard")
+        reset()
+        def bars(before):
+            return js(CM + before + """ await wait(500); const m = document.querySelector('.fkm-note-modal');
+                return { top: Math.round(m.getBoundingClientRect().top), bar: Math.round(m.querySelector('.fkm-bottom-bar').getBoundingClientRect().bottom), screen: innerHeight };""")
+        up = bars("cm.focus(); document.documentElement.style.setProperty('--keyboard-height', '300px');")
+        lt.check("with the keyboard open, the bottom bar sits right above it", up["bar"] == up["screen"] - 300, up)
+        lt.check("…and the note's top bar stays at the top", up["top"] == 0, up)
+        down = bars("document.documentElement.style.removeProperty('--keyboard-height'); cm.contentDOM.blur();")
+        lt.check("…and back at the bottom once the keyboard is put away", down["bar"] == down["screen"] and down["top"] == 0, down)
+
         # Card titles on the board, as in Keep's iPhone app: 10.7 pt from the card's left edge.
         card = js(PRE + """const c = [...document.querySelectorAll('.fkm-board .fkm-card')].find(c => c.querySelector('.fkm-card-title'));
             const t = c.querySelector('.fkm-card-title'); const w = document.createTreeWalker(t, NodeFilter.SHOW_TEXT); const n = w.nextNode();
@@ -298,7 +311,7 @@ def main():
         js(CM + "const d = cm.state.doc.toString(); cm.dispatch({ selection: { anchor: d.indexOf('Top two'), head: d.indexOf('Top two') + 3 } });")
         lt.check("not while text is selected (moving a selection's handles)", swipe("Top two", 90) == base)
     finally:
-        js(PRE + f"""document.querySelectorAll('.modal-container').forEach(m => m.remove());
+        js(PRE + f"""document.querySelectorAll('.modal-container').forEach(m => m.remove()); document.documentElement.style.removeProperty('--keyboard-height');
             const f = app.vault.getAbstractFileByPath({json.dumps(F)}); if (f) await app.vault.delete(f, true); return 1;""")
         phone_layout(False)
     failed = [r for r in lt.results if not r[1]]
