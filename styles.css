@@ -2,11 +2,6 @@
 
 /* ===== Notes and board ===== */
 
-/* Pinned note: the pin in the top bar in the accent colour. */
-.fkm-pin-button.is-pinned {
-	color: var(--interactive-accent);
-}
-
 /* A note with a reminder: the bell in the accent colour. */
 .fkm-reminder-button.has-reminder {
 	color: var(--interactive-accent);
@@ -95,23 +90,112 @@ button.fkm-reminder-remove {
 	color: var(--text-muted);
 }
 
-/* The search bar above it, always visible like Keep's. */
-.fkm-search {
+/* The board's top bar, always visible like Keep's. On a computer, Keep's website: ☰, what
+   the board shows ("Notes", a label, "Reminders", "Archive") and the search field, across
+   the whole width with a line below. On a phone (.fkm-narrow), Keep's app: one rounded
+   search bar with ☰ in it. */
+.fkm-board-top {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	margin: 0 -16px 16px;
+	padding: 8px 16px 8px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+}
+
+.fkm-board-bar {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	max-width: 600px;
-	margin: 16px auto 0;
-	padding: 6px 12px;
-	border: 1px solid var(--background-modifier-border);
+	gap: 4px;
+}
+
+.fkm-board-heading {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 16px;
+	width: 220px;
+	padding: 0 8px;
+	color: var(--text-muted);
+	font-size: 22px;
+	white-space: nowrap;
+}
+
+.fkm-board-heading-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.fkm-board-heading-icon,
+.fkm-search-icon {
+	display: flex;
+}
+
+.fkm-board-heading-icon svg {
+	width: 24px;
+	height: 24px;
+}
+
+.fkm-search {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	gap: 12px;
+	min-width: 0;
+	max-width: 720px;
+	height: 46px;
+	padding: 0 8px 0 14px;
 	border-radius: 8px;
-	background: var(--background-secondary);
+	background: var(--fkm-search-bg);
 	color: var(--text-muted);
 }
 
 .fkm-search:focus-within {
 	background: var(--background-primary);
-	box-shadow: var(--shadow-s);
+	box-shadow: 0 1px 1px rgba(65, 69, 73, 0.3), 0 1px 3px 1px rgba(65, 69, 73, 0.15);
+}
+
+/* Phones: Keep's rounded search bar. */
+.fkm-board.fkm-narrow .fkm-board-top {
+	margin: 0 0 8px;
+	padding: 8px 0;
+	border-bottom: none;
+}
+
+.fkm-narrow .fkm-board-bar {
+	height: 48px;
+	padding: 0 4px;
+	border-radius: 24px;
+	background: var(--fkm-search-bg);
+}
+
+.fkm-narrow .fkm-board-heading,
+.fkm-narrow .fkm-search-icon {
+	display: none;
+}
+
+.fkm-narrow .fkm-search,
+.fkm-narrow .fkm-search:focus-within {
+	height: auto;
+	max-width: none;
+	padding: 0 4px 0 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+/* On a computer the label is in the bar's heading; on a phone it's a chip in the search bar. */
+.fkm-board:not(.fkm-narrow) .fkm-search-chip.is-active {
+	display: none;
+}
+
+/* Keep has no title bar above it: Keep's bar takes the place of Obsidian's. */
+.workspace-leaf-content.fkm-has-board-bar > .view-header {
+	display: none;
+}
+
+.is-phone .workspace-leaf-content.fkm-has-board-bar {
+	--view-top-spacing: var(--safe-area-inset-top);
 }
 
 body.fkm-keep .fkm-search input {
@@ -126,6 +210,18 @@ body.fkm-keep .fkm-search input {
 
 .fkm-search-menu {
 	display: flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 48px;
+	height: 48px;
+	border-radius: 50%;
+	color: var(--text-muted);
+}
+
+.fkm-narrow .fkm-search-menu {
+	width: 40px;
+	height: 40px;
 	color: var(--text-normal);
 }
 
@@ -715,19 +811,6 @@ body.fkm-keep.is-phone .modal .fkm-back-button {
 	padding: 0 8px 96px;
 }
 
-/* The search bar stays at the top while the board scrolls, like Keep's. */
-.fkm-board-top {
-	position: sticky;
-	top: 0;
-	z-index: 2;
-	padding: 8px 0 4px;
-	background: var(--background-primary);
-}
-
-.fkm-board-top .fkm-search {
-	margin-top: 8px;
-}
-
 .fkm-board .fkm-take-note {
 	margin-bottom: 24px;
 }
@@ -940,10 +1023,6 @@ body.fkm-keep.is-phone .modal .fkm-back-button {
 	opacity: 1;
 }
 
-.fkm-card-pin.is-pinned svg {
-	fill: currentColor;
-}
-
 .fkm-card-actions {
 	display: flex;
 	gap: 2px;
@@ -1074,15 +1153,10 @@ body:not(.is-phone) .fkm-note-modal .view-header {
 	padding-inline-end: 52px;
 }
 
-/* The pop-up's editor, kept for the next note. */
+/* The pop-up's editors, with the notes on screen loaded and ready. Not drawn: opening a
+   pop-up restyles the page, and hidden but drawn editors would each add to that. */
 .fkm-popup-holder {
-	position: fixed;
-	left: -10000px;
-	top: 0;
-	width: min(800px, 100vw);
-	height: 100vh;
-	visibility: hidden;
-	pointer-events: none;
+	display: none;
 }
 
 /* ===== Phones ===== */
@@ -1173,13 +1247,25 @@ body.fkm-keep.is-phone.fkm-keep .notice-container {
 	border-color: #4f5154;
 }
 
-.fkm-search {
-	border-color: transparent;
-	background: #e9eef6;
+/* The search field: Keep's website on a computer, Keep's app on a phone. */
+.fkm-board {
+	--fkm-search-bg: #f1f3f4;
 }
 
-.theme-dark .fkm-search {
-	background: #282a2c;
+.theme-dark .fkm-board {
+	--fkm-search-bg: #525355;
+}
+
+.fkm-board.fkm-narrow {
+	--fkm-search-bg: #e9eef6;
+}
+
+.theme-dark .fkm-board.fkm-narrow {
+	--fkm-search-bg: #282a2c;
+}
+
+.theme-dark .fkm-board .fkm-search input::placeholder {
+	color: var(--text-muted);
 }
 
 .theme-dark .fkm-take-note {

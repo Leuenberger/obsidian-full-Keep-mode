@@ -732,6 +732,23 @@ def main():
                          anywhere: document.querySelectorAll('.fkm-take-note').length };""")
             check("the board has a \"Take a note…\" bar", bar["inBoard"], bar)
             check("cards are in board order", card_order() == ["Card A", "Card B", "Card C"], card_order())
+            top = ob.js("""const el = window.__fkmBoard.view.containerEl;
+                const header = el.querySelector(':scope > .view-header');
+                return { parts: [...el.querySelectorAll('.fkm-board-bar > *')].map(e => e.className.split(' ')[0]),
+                         heading: el.querySelector('.fkm-board-heading-text')?.textContent ?? null,
+                         obsidianHeader: header ? getComputedStyle(header).display : null };""")
+            check("Keep's top bar: ☰, \"Notes\" and the search field, with no Obsidian title bar above it",
+                  top == {"parts": ["fkm-search-menu", "fkm-board-heading", "fkm-search"], "heading": "Notes", "obsidianHeader": "none"}, top)
+            pre = ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
+                const files = () => app.vault.getMarkdownFiles().filter(f => f.path.startsWith(FOLDER + '/Card'));
+                const ready = () => files().every(f => (p.popupPool ?? []).some(e => e.file === f && e.leaf.view?.file === f));
+                const mtimes = files().map(f => f.stat.mtime).join();
+                const recent = app.workspace.getLastOpenFiles().join();
+                for (let i = 0; i < 60 && !ready(); i++) await wait(250);
+                await wait(300);
+                return { ready: ready(), wrote: files().map(f => f.stat.mtime).join() !== mtimes, recentSame: app.workspace.getLastOpenFiles().join() === recent };""")
+            check("the notes on screen are loaded beforehand, writing nothing and not counted as opened",
+                  pre == {"ready": True, "wrote": False, "recentSame": True}, pre)
             a, c = card_center("Card A"), card_center("Card C")
             ob.mouse("mouseMoved", c["x"], c["y"], 0)
             ob.mouse("mousePressed", c["x"], c["y"])
@@ -744,15 +761,26 @@ def main():
             check("…without opening the note", modal_open() == 0)
 
             b = card_center("Card B")
+            # Count the notes loaded into an editor while the card opens (none: it's ready).
+            ob.js("""const p = app.plugins.plugins['full-keep-mode']; const proto = Object.getPrototypeOf(p.popupPool[0].leaf);
+                window.__loads = 0; window.__openFile = proto.openFile;
+                proto.openFile = function (...a) { window.__loads++; return window.__openFile.apply(this, a); }; return 1;""")
             ob.mouse("mouseMoved", b["x"], b["y"], 0)
             ob.mouse("mousePressed", b["x"], b["y"])
             ob.mouse("mouseReleased", b["x"], b["y"])
             time.sleep(1.5)
+            loads = ob.js("""const p = app.plugins.plugins['full-keep-mode']; Object.getPrototypeOf(p.popupPool[0].leaf).openFile = window.__openFile;
+                const m = [...(p.openNotes ?? [])].pop(); return { loads: window.__loads, note: m?.leaf?.view?.file?.basename ?? null };""")
             check("clicking a card still opens it in the pop-up", modal_open() == 1)
+            check("…at once: its note was ready, nothing is loaded", loads == {"loads": 0, "note": "Card B"}, loads)
             labels = ob.js("return [...document.querySelectorAll('.fkm-note-modal .view-actions .clickable-icon')].map(b => b.getAttribute('aria-label').split('\\n')[0]);")
             check("the pop-up's top bar has Undo, Redo, Pin and Colour", all(x in labels for x in ("Undo", "Redo", "Pin", "Colour")), labels)
+            pin_icon = "return [...document.querySelector('.fkm-note-modal .fkm-pin-button svg').classList].find(c => c.startsWith('fkm-pin')) ?? null;"
+            icon_before = ob.js(pin_icon)
             ob.js(PRELUDE + "document.querySelector('.fkm-note-modal .fkm-pin-button').click(); await wait(800);")
             check("the Pin button pins the note", frontmatter("Card B").get("keep_pinned") is True, frontmatter("Card B"))
+            icon_after = ob.js(pin_icon)
+            check("Keep's pin: outlined, and filled once pinned (not crossed out)", (icon_before, icon_after) == ("fkm-pin", "fkm-pin-filled"), (icon_before, icon_after))
             orders = ob.js(PRELUDE + """return app.vault.getMarkdownFiles().filter(f => f.path.startsWith(FOLDER + '/Card')).map(f => [f.basename, app.metadataCache.getFileCache(f)?.frontmatter?.keep_order]);""")
             top_b = dict(orders)["Card B"]
             check("…and moves it to the top of the pinned notes, like Keep", all(top_b > o for n, o in orders if n != "Card B" and o is not None), orders)
@@ -917,8 +945,8 @@ def main():
                 await p.setLabel(app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'), 'Fruit', true); await wait(800);
                 app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true });
                 await p.showOnBoard('label:Fruit'); await wait(1500);""")
-            chip = ob.js("return window.__fkmBoard.view.containerEl.querySelector('.fkm-search-chip')?.innerText ?? null;")
-            check("a label shows only its notes, named in the search bar", card_order() == ["Card A"] and chip == "Fruit", (card_order(), chip))
+            chip = ob.js("return window.__fkmBoard.view.containerEl.querySelector('.fkm-board-heading-text')?.textContent ?? null;")
+            check("a label shows only its notes, named in the top bar like Keep", card_order() == ["Card A"] and chip == "Fruit", (card_order(), chip))
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-take-note-list').click(); await wait(1500);")
             new_text = ob.js("""const f = app.vault.getMarkdownFiles().sort((a, b) => b.stat.ctime - a.stat.ctime)[0];
                 return await app.vault.read(f);""")
@@ -951,7 +979,7 @@ def main():
             tags = [frontmatter(n).get("tags") for n in ("Card A", "Card B", "Card C")]
             check("Edit labels: renaming changes the label in all its notes", tags == [["Fruit", "fkm-test-fruits"], ["fkm-test-fruits"], ["fkm-test-veg"]], tags)
             time.sleep(0.5)
-            chip = ob.js("return window.__fkmBoard.view.containerEl.querySelector('.fkm-search-chip')?.innerText ?? null;")
+            chip = ob.js("return window.__fkmBoard.view.containerEl.querySelector('.fkm-board-heading-text')?.textContent ?? null;")
             check("…and the board showing it follows the new name", chip == "fkm-test-fruits" and sorted(card_order()) == ["Card A", "Card B"], (chip, card_order()))
             ob.js(label_row_js("fkm-test-fruits", """row.querySelector('.fkm-edit-labels-delete').click(); await wait(400);
                 const text = document.querySelector('.fkm-confirm-modal p').textContent; window.__confirmText = text;
@@ -984,6 +1012,22 @@ def main():
             const a = [...document.querySelectorAll('.notice a')].filter(a => a.textContent === 'Undo').pop();
             if (!a) return false; a.click(); await wait(700); return true;""")
         check("…and \"Undo\" in the notice unarchives it", undo_link and "keep_archived" not in frontmatter("archive"), frontmatter("archive"))
+        click_pin = PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-pin-button').click(); await wait(700);"
+        last_notice = "return [...document.querySelectorAll('.notice')].map(n => n.textContent).pop() ?? null;"
+        click_undo = PRELUDE + """const a = [...document.querySelectorAll('.notice a')].filter(a => a.textContent === 'Undo').pop();
+            if (!a) return false; a.click(); await wait(700); return true;"""
+        state = lambda: {k: frontmatter("archive").get(k) for k in ("keep_pinned", "keep_archived")}
+        ob.js(click_pin)
+        ob.js(click_archive)
+        check("archiving a pinned note unpins it, like Keep", (state(), ob.js(last_notice)) == ({"keep_pinned": None, "keep_archived": True}, "Note unpinned and archived. Undo"), (state(), ob.js(last_notice)))
+        ob.js(click_undo)
+        check("…and Undo brings it back pinned", state() == {"keep_pinned": True, "keep_archived": None}, state())
+        ob.js(click_archive)
+        ob.js(click_pin)
+        check("pinning an archived note unarchives it, like Keep", (state(), ob.js(last_notice)) == ({"keep_pinned": True, "keep_archived": None}, "Note unarchived and pinned. Undo"), (state(), ob.js(last_notice)))
+        ob.js(click_undo)
+        check("…and Undo puts it back in the archive, unpinned", state() == {"keep_pinned": None, "keep_archived": True}, state())
+        ob.js(click_archive)
 
         ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-reminder-button').click(); await wait(400);")
         picks = ob.js("return [...document.querySelectorAll('.fkm-reminder-modal .fkm-reminder-pick span:first-child')].map(s => s.textContent);")
@@ -1028,6 +1072,13 @@ def main():
         check("Undo and Redo buttons in the note's top bar", "Undo" in labels and "Redo" in labels, labels)
         ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-undo-button').click(); await wait(400);")
         check("the Undo button undoes", body() == "- [x] A\n- [ ] B\n- [x] C\n- [ ] D", body())
+
+        print("Updating the plugin")
+        menus = ob.js(PRELUDE + """for (let i = 0; i < 2; i++) {
+                await app.plugins.disablePlugin('full-keep-mode'); await app.plugins.enablePlugin('full-keep-mode'); await wait(1500);
+            }
+            return app.workspace.getLeavesOfType('full-keep-mode-labels').length;""")
+        check("reloaded (as by an update), the plugin keeps one side menu", menus == 1, menus)
 
     finally:
         ob.js(PRELUDE + """

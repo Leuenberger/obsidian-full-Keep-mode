@@ -45,8 +45,9 @@ whenever you want it.
 | Drag cards to reorder, tick items on a card | ✓ |
 | Checklists: ticked items move down, sub-items, two levels | ✓ Keep's exact rules |
 | Drag items, swipe sideways to indent (phone) | ✓ |
-| Note opens over the board (full screen on phones) | ✓ |
-| Your notes from Keep | ✓ imported with their order, colours, labels and sub-items |
+| Note opens over the board (full screen on phones) | ✓ and opens at once: the notes on screen are ready beforehand |
+| Links | ✓ Obsidian's `[[links]]` between notes work, also in the pop-up |
+| Your notes from Keep | ✓ imported with their order, colours, labels and sub-items; links between them become Obsidian links |
 
 ## Checklists, just like Keep's
 
@@ -92,6 +93,9 @@ whenever you want it.
 - **Notes** have pin, colour, reminder and archive buttons in the top bar,
   hidden properties, and their labels and "Edited …" below the text.
 - **Keep titles** can have characters a file name can't ("Sept/Oct 2026").
+- **Links between notes** are Obsidian's `[[links]]` (type `[[` to pick a
+  note). In a pop-up, a link opens the linked note right there; back returns to
+  the note you came from, then to the board.
 - **Reminders** pop up in Obsidian (plus a system notification on a computer).
 
 </details>
@@ -107,7 +111,10 @@ choose an export of your notes. There are two ways to get one:
   order of your notes (newest come first) and **not** checklist sub-items (they
   come in flat).
 - **The export script (everything).** Also keeps the order of your notes and the
-  sub-items. It needs Python and a one-time sign-in code; see below.
+  sub-items, and links from one Keep note to another (`keep.google.com/#NOTE/…`)
+  become Obsidian links, so they keep working. It needs Python and a one-time
+  sign-in code; see below. (Takeout can't do this: it leaves out the notes' IDs
+  that such links point to.)
 
 <details>
 <summary><b>How to use the export script</b></summary>

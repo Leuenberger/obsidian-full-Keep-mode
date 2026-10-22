@@ -84,6 +84,21 @@ def swipe(text, dx, hold=0, dy=2):
 def main():
     phone_layout(True)
     try:
+        # The board's top, like Keep's app: its rounded search bar right under the status bar.
+        bar = None
+        for _ in range(20):
+            bar = js("""const b = [...app.plugins.plugins['full-keep-mode'].boards].find(b => b.boardEl.isShown());
+                const el = b?.boardEl.querySelector('.fkm-board-bar'); if (!el) return null;
+                const header = b.boardEl.closest('.workspace-leaf-content').querySelector(':scope > .view-header');
+                const safe = parseFloat(getComputedStyle(document.body).getPropertyValue('--safe-area-inset-top')) || 0;
+                const r = el.getBoundingClientRect();
+                return { obsidianHeader: header ? getComputedStyle(header).display : null, top: Math.round(r.top - safe), height: Math.round(r.height),
+                         radius: getComputedStyle(el).borderRadius, heading: getComputedStyle(el.querySelector('.fkm-board-heading')).display };""")
+            if bar:
+                break
+            time.sleep(0.5)
+        lt.check("the board's top is Keep's rounded search bar, right under the status bar (no Obsidian title bar)",
+                 bar == {"obsidianHeader": "none", "top": 8, "height": 48, "radius": "24px", "heading": "none"}, bar)
         js(PRE + f"""const F = {json.dumps(F)};
             if (!app.vault.getAbstractFileByPath(F)) await app.vault.createFolder(F);
             const p = F + "/Phone.md"; let f = app.vault.getAbstractFileByPath(p);

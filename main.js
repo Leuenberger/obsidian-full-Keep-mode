@@ -66,6 +66,11 @@ const OPT_OUT_PROPERTY = "full-keep-mode";
 
 // Note properties, shared with the Keep Bases View plugin (which draws the board).
 const PIN_PROPERTY = "keep_pinned";
+// Keep's pin: a pushpin, outlined, and filled when the note is pinned (24 px grid).
+const PIN_ICON = "fkm-pin";
+const PINNED_ICON = "fkm-pin-filled";
+const PIN_SHAPE = "M7 2h10a1 1 0 0 1 0 2h-1v5c0 1.66 1.34 3 3 3v2h-6v7l-1 1-1-1v-7H5v-2c1.66 0 3-1.34 3-3V4H7a1 1 0 0 1 0-2z";
+const PIN_HOLE = "M10 4h4v5c0 1.12.37 2.16 1 3H9c.63-.84 1-1.88 1-3V4z";
 const COLOR_PROPERTY = "keep_color";
 const ORDER_PROPERTY = "keep_order"; // position on the board; higher = further up
 const ARCHIVE_PROPERTY = "keep_archived"; // true = archived (the tag #archived counts too)
@@ -1529,6 +1534,11 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				.setIcon(this.selectionLog ? "square" : "circle-dot").setSection("action")
 				.onClick(() => void this.toggleSelectionLog()));
 		}));
+		// The last touch, click, key or scroll (notes are preloaded only in the pauses).
+		const input = () => { this.lastInput = Date.now(); };
+		for (const type of ["pointerdown", "touchstart", "keydown", "wheel", "scroll"]) {
+			this.registerDomEvent(document, type, input, { capture: true, passive: true });
+		}
 		this.app.workspace.onLayoutReady(() => {
 			if (!this._loaded) return; // turned off (reloaded or updated) in the meantime
 			if (this.settings.labelsSidebar) void this.openLabelsView(false);
@@ -1539,10 +1549,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				if (this.settings.boardAsHome && obsidian.Platform.isPhone && leaf?.view?.getViewType?.() === "empty") {
 					void this.showBoardHome(false, leaf);
 				}
+				if (this.boardOf(leaf)) this.preloadSoon(); // back on the board
 			}));
 		});
 		const relabel = obsidian.debounce(() => this.labelsView()?.render(), 1000, true);
 		this.registerEvent(this.app.metadataCache.on("changed", () => relabel()));
+		const pinIcon = d => `<path transform="scale(4.1667)" fill="currentColor" stroke="none" fill-rule="evenodd" d="${d}"/>`;
+		obsidian.addIcon(PIN_ICON, pinIcon(PIN_SHAPE + PIN_HOLE));
+		obsidian.addIcon(PINNED_ICON, pinIcon(PIN_SHAPE));
 
 		// Keep the top-bar icons in step when a note is changed elsewhere (e.g. on the board).
 		this.registerEvent(this.app.metadataCache.on("changed", file => this.renderButtons(file)));
@@ -1611,7 +1625,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			if (leaf.view?.fullKeepModeButtons === this) delete leaf.view.fullKeepModeButtons;
 		});
 		document.body.removeClass("fkm-hide-properties", "fkm-keep");
-		this.popupLeaf?.detach();
+		window.clearTimeout(this.preloadTimer);
+		this.popupPool?.forEach(entry => entry.leaf.detach());
+		this.popupPool = [];
 		this.popupHolder?.remove();
 		document.querySelectorAll(".fkm-note-footer, .fkm-bottom-bar, .fkm-title").forEach(el => el.remove());
 		document.querySelectorAll(".fkm-has-title").forEach(el => el.removeClass("fkm-has-title"));
@@ -1620,7 +1636,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			for (const c of COLORS) if (c.id) el.removeClass(`fkm-color-${c.id}`);
 		});
 		document.querySelectorAll(".fkm-has-footer").forEach(el => el.removeClass("fkm-has-footer"));
-		document.querySelectorAll(".fkm-board-leaf").forEach(el => el.removeClass("fkm-board-leaf"));
+		document.querySelectorAll(".fkm-board-leaf").forEach(el => el.removeClass("fkm-board-leaf", "fkm-has-board-bar"));
 		document.querySelectorAll(".fkm-drop-indicator, .fkm-take-note, .fkm-drag-ghost").forEach(el => el.remove());
 		this.boardListeners.forEach(remove => remove());
 		this.boardListeners = [];
@@ -1712,7 +1728,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			added.push(bell);
 		}
 		if (s.pinButton) {
-			const pin = view.addAction("pin", "Pin", () => this.togglePin(view));
+			const pin = view.addAction(PIN_ICON, "Pin", () => this.togglePin(view));
 			pin.addClass("fkm-pin-button");
 			this.pinButtons.set(view, pin);
 			this.renderPin(view, pin);
@@ -2006,32 +2022,44 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		obsidian.setIcon(button, archived ? "archive-restore" : "archive");
 	}
 
-	// Like Keep: archive or unarchive, with "Undo" in the confirmation.
+	// Like Keep: archive or unarchive, with "Undo" in the confirmation. A pinned note is
+	// unpinned as it's archived (Undo pins it again).
 	async toggleArchive(view) {
 		const file = view.file;
 		if (!file || file.extension !== "md") return;
 		const archive = !this.isArchived(file);
+		const pinned = this.isPinned(file);
 		await this.setArchived(file, archive);
+		this.undoNotice(archive ? (pinned ? "Note unpinned and archived" : "Note archived") : "Note unarchived",
+			() => this.setArchived(file, !archive, { pinned }));
+	}
+
+	// Keep's confirmation, with "Undo".
+	undoNotice(text, undo) {
 		const fragment = createFragment(f => {
-			f.appendText(archive ? "Note archived. " : "Note unarchived. ");
-			const undo = f.createEl("a", { text: "Undo", href: "#" });
-			undo.addEventListener("click", event => {
+			f.appendText(`${text}. `);
+			const link = f.createEl("a", { text: "Undo", href: "#" });
+			link.addEventListener("click", event => {
 				event.preventDefault();
-				void this.setArchived(file, !archive);
+				void undo();
 			});
 		});
 		new obsidian.Notice(fragment, 6000);
 	}
 
-	async setArchived(file, archive) {
+	// Archived, a note isn't pinned; unarchived, it's pinned only if `pinned` says so.
+	async setArchived(file, archive, { pinned = false } = {}) {
 		if (archive) {
 			await this.app.fileManager.processFrontMatter(file, fm => {
 				fm[ARCHIVE_PROPERTY] = true;
+				delete fm[PIN_PROPERTY];
 			});
 			return;
 		}
 		await this.app.fileManager.processFrontMatter(file, fm => {
 			delete fm[ARCHIVE_PROPERTY];
+			if (pinned) fm[PIN_PROPERTY] = true;
+			else delete fm[PIN_PROPERTY];
 			if (Array.isArray(fm.tags)) {
 				fm.tags = fm.tags.filter(tag => String(tag).replace(/^#/, "").toLowerCase() !== ARCHIVE_TAG);
 				if (!fm.tags.length) delete fm.tags;
@@ -2209,22 +2237,24 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		return file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {};
 	}
 
+	// Like Keep, an archived note is never pinned (archiving unpins it, pinning unarchives it).
 	isPinned(file) {
 		const value = this.frontmatterOf(file)[PIN_PROPERTY];
-		return value === true || value === "true";
+		return (value === true || value === "true") && !this.isArchived(file);
 	}
 
 	renderPin(view, button) {
 		const pinned = this.isPinned(view.file);
 		button.toggleClass("is-pinned", pinned);
 		button.setAttribute("aria-label", pinned ? "Unpin" : "Pin");
-		obsidian.setIcon(button, pinned ? "pin-off" : "pin");
+		obsidian.setIcon(button, pinned ? PINNED_ICON : PIN_ICON);
 	}
 
 	async togglePin(view) {
 		const file = view.file;
 		if (!file || file.extension !== "md") return;
 		const pinned = this.isPinned(file);
+		const archived = this.isArchived(file);
 		// Like Keep: pinned or unpinned, the note goes to the top of its section.
 		const top = this.app.vault.getMarkdownFiles().reduce((max, f) => {
 			const order = Number(this.frontmatterOf(f)[ORDER_PROPERTY]);
@@ -2235,6 +2265,11 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			else fm[PIN_PROPERTY] = true;
 			fm[ORDER_PROPERTY] = top + 1;
 		});
+		// Pinning an archived note brings it back from the archive, like in Keep.
+		if (!pinned && archived) {
+			await this.setArchived(file, false, { pinned: true });
+			this.undoNotice("Note unarchived and pinned", () => this.setArchived(file, true));
+		}
 	}
 
 	showColorMenu(view, event) {
@@ -2476,14 +2511,20 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		return [...new Set((obsidian.parseFrontMatterTags(fm) ?? []).map(tag => tag.replace(/^#/, "")))];
 	}
 
-	// The search bar at the top of the board, always visible like Keep's, with the ☰
-	// button for the side menu at its left.
+	// The board's top bar, like Keep's: ☰ for the side menu, what the board shows (on a
+	// computer: "Notes", a label, "Reminders" or "Archive") and the search field, always
+	// visible. On a phone it's one rounded search bar with ☰ in it, like Keep's app.
 	searchBar() {
 		const filter = this.boardFilter;
-		const bar = createDiv({ cls: "fkm-search" });
-		const menu = bar.createSpan({ cls: "fkm-search-menu clickable-icon", attr: { "aria-label": "Labels and archive" } });
+		const top = createDiv({ cls: "fkm-board-bar" });
+		const menu = top.createSpan({ cls: "fkm-search-menu clickable-icon", attr: { "aria-label": "Labels and archive" } });
 		obsidian.setIcon(menu, "menu");
 		menu.addEventListener("click", () => void this.toggleLabelsView());
+		const heading = top.createDiv({ cls: "fkm-board-heading" });
+		heading.createSpan({ cls: "fkm-board-heading-icon" });
+		heading.createSpan({ cls: "fkm-board-heading-text" });
+		const bar = top.createDiv({ cls: "fkm-search" });
+		obsidian.setIcon(bar.createSpan({ cls: "fkm-search-icon" }), "search");
 		const chip = bar.createSpan({ cls: "fkm-search-chip" });
 		const input = bar.createEl("input", { type: "search", placeholder: "Search your notes", value: filter.text });
 		const clear = bar.createSpan({ cls: "fkm-search-clear clickable-icon", attr: { "aria-label": "Clear search" } });
@@ -2508,12 +2549,19 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			this.activeLabel = "notes";
 			void this.setFilter({ tag: null, reminders: false });
 		});
-		this.renderSearchBar(bar);
-		return bar;
+		this.renderSearchBar(top);
+		return top;
 	}
 
 	renderSearchBar(bar) {
 		const filter = this.boardFilter;
+		const heading = bar.querySelector(".fkm-board-heading");
+		if (heading) {
+			const [icon, text] = bar.closest(".fkm-board.fkm-archive") ? ["archive", "Archive"]
+				: filter.tag ? ["tag", filter.tag] : filter.reminders ? ["bell", "Reminders"] : ["lightbulb", "Notes"];
+			obsidian.setIcon(heading.querySelector(".fkm-board-heading-icon"), icon);
+			heading.querySelector(".fkm-board-heading-text").setText(text);
+		}
 		const chip = bar.querySelector(".fkm-search-chip");
 		const label = filter.tag ? filter.tag : filter.reminders ? "Reminders" : "";
 		chip.empty();
@@ -2529,7 +2577,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	}
 
 	renderSearchBars() {
-		document.querySelectorAll(".fkm-search").forEach(bar => this.renderSearchBar(bar));
+		document.querySelectorAll(".fkm-board-bar").forEach(bar => this.renderSearchBar(bar));
 	}
 
 	// "Take a note…", with Keep's checkbox icon for a new list at its right end.
@@ -2720,12 +2768,12 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const note = { file };
 		const menu = new obsidian.Menu();
 		const pinned = this.isPinned(file);
-		menu.addItem(item => item.setTitle(pinned ? "Unpin" : "Pin").setIcon(pinned ? "pin-off" : "pin").onClick(() => this.togglePin(note)));
+		menu.addItem(item => item.setTitle(pinned ? "Unpin" : "Pin").setIcon(pinned ? PINNED_ICON : PIN_ICON).onClick(() => this.togglePin(note)));
 		if (this.settings.reminders) menu.addItem(item => item.setTitle("Remind me").setIcon("bell").onClick(() => new ReminderModal(this, file).open()));
 		if (this.settings.colorButton) menu.addItem(item => item.setTitle("Colour").setIcon("palette").onClick(() => this.showColorMenu(note, event)));
 		const archived = this.isArchived(file);
 		menu.addItem(item => item.setTitle(archived ? "Unarchive" : "Archive").setIcon(archived ? "archive-restore" : "archive")
-			.onClick(() => void this.setArchived(file, !archived)));
+			.onClick(() => void this.toggleArchive(note)));
 		menu.addItem(item => item.setTitle("Labels").setIcon("tag").onClick(() => new LabelModal(this, file).open()));
 		menu.addSeparator();
 		menu.addItem(item => item.setTitle("Delete").setIcon("trash-2").setWarning(true).onClick(async () => {
@@ -3136,7 +3184,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		if (note.order) front.push(`${ORDER_PROPERTY}: ${note.order}`);
 		const color = KEEP_COLORS[note.color];
 		if (color) front.push(`${COLOR_PROPERTY}: ${color}`);
-		if (note.pinned) front.push(`${PIN_PROPERTY}: true`);
+		if (note.pinned && !note.archived) front.push(`${PIN_PROPERTY}: true`);
 		if (note.archived) front.push(`${ARCHIVE_PROPERTY}: true`);
 		const labels = [...new Set((note.labels ?? []).map(l => LabelModal.cleanName(l)).filter(Boolean))];
 		if (labels.length) front.push("tags:", ...labels.map(l => `  - ${yaml(l)}`));
@@ -3290,55 +3338,119 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		return leaf?.view?.containerEl?.querySelector(".fkm-board") ? leaf : null;
 	}
 
-	// The editor of the pop-up: kept and reused, so a note opens faster than with a new
-	// editor each time. A second pop-up open at the same time (another board tab) gets
-	// its own.
-	takePopupLeaf() {
-		if (this.popupLeaf && !this.popupLeafBusy) {
-			this.popupLeafBusy = true;
-			return this.popupLeaf;
-		}
-		const WorkspaceLeaf = this.app.workspace.getLeaf(false).constructor;
-		const leaf = new WorkspaceLeaf(this.app);
-		if (!this.popupLeaf) {
-			this.popupLeaf = leaf;
-			this.popupLeafBusy = true;
-		}
-		return leaf;
+	// ----- the pop-up's editors: the notes on screen are ready before they're tapped -----------
+	// Opening a note spends nearly all its time loading the note into an editor. So the
+	// notes whose cards are on screen are loaded beforehand, out of sight, one by one while
+	// the board sits idle; a tapped card's note then only has to be shown. A loaded editor
+	// follows changes to its note like any open note (and loading writes nothing).
+
+	popupPoolSize() {
+		return obsidian.Platform.isPhone ? 8 : 12;
 	}
 
-	// Build the pop-up's editor in the background once a board is shown, so even the
-	// first note opens quickly.
-	warmUpPopup(file) {
-		if (this.popupLeaf || this.warmingUp || !(file instanceof obsidian.TFile)) return;
-		this.warmingUp = true;
-		window.setTimeout(async () => {
-			if (!this._loaded || this.popupLeaf) return;
-			const leaf = this.takePopupLeaf();
-			this.returnPopupLeaf(leaf); // parked, hidden
-			try {
-				await leaf.openFile(file, { state: { mode: "source" } });
-			} catch {
-				// not important
-			}
-		}, 1500);
+	// The pop-up's editor with `file` in it: the one that already has it (waiting if it's
+	// being loaded right now), else a free one (the one used longest ago) or a new one.
+	async takePopupLeaf(file) {
+		const pool = (this.popupPool ??= []);
+		const entry = pool.find(e => !e.busy && e.file === file)
+			?? pool.filter(e => !e.busy && !e.loading).sort((a, b) => a.used - b.used)[0]
+			?? this.newPopupEntry();
+		entry.busy = true;
+		entry.used = Date.now();
+		try {
+			if (entry.loading) await entry.loading.catch(() => {});
+			if (entry.leaf.view?.file !== file) await this.loadInto(entry, file);
+		} catch (err) {
+			entry.busy = false;
+			throw err;
+		}
+		return entry.leaf;
 	}
 
-	// Out of sight, but laid out like the pop-up, so the note is drawn and measured before
-	// the pop-up appears.
+	newPopupEntry() {
+		const WorkspaceLeaf = (this.app.workspace.getMostRecentLeaf() ?? this.app.workspace.getLeaf(false)).constructor;
+		const entry = { leaf: new WorkspaceLeaf(this.app), file: null, busy: false, loading: null, used: 0 };
+		(this.popupPool ??= []).push(entry);
+		this.parkPopupLeaf(entry.leaf);
+		return entry;
+	}
+
+	async loadInto(entry, file) {
+		entry.file = file;
+		const loading = entry.leaf.openFile(file, { state: { mode: "source" } });
+		entry.loading = loading;
+		try {
+			await loading;
+		} finally {
+			if (entry.loading === loading) entry.loading = null;
+		}
+	}
+
+	// Out of sight (and not drawn) until its pop-up appears.
 	parkPopupLeaf(leaf) {
 		if (!this.popupHolder) this.popupHolder = document.body.createDiv({ cls: "fkm-popup-holder" });
 		if (leaf.containerEl.parentElement !== this.popupHolder) this.popupHolder.appendChild(leaf.containerEl);
 	}
 
+	// Back from a closed pop-up: saved right away, and kept ready for the next time.
 	returnPopupLeaf(leaf) {
-		if (leaf !== this.popupLeaf) {
+		if (leaf.containerEl.contains(document.activeElement)) document.activeElement.blur();
+		const entry = this.popupPool?.find(e => e.leaf === leaf);
+		if (!entry) {
 			leaf.detach();
 			return;
 		}
-		if (leaf.containerEl.contains(document.activeElement)) document.activeElement.blur();
+		void leaf.view?.save?.();
 		this.parkPopupLeaf(leaf);
-		this.popupLeafBusy = false;
+		entry.busy = false;
+		entry.file = leaf.view?.file ?? null; // links may have led to another note
+		entry.used = Date.now();
+		this.trimPopupPool();
+	}
+
+	// No more editors than the pool's size: the ones used longest ago go.
+	trimPopupPool(keep = []) {
+		const pool = this.popupPool ?? [];
+		const spare = pool.filter(e => !e.busy && !e.loading && !keep.includes(e.file)).sort((a, b) => a.used - b.used);
+		while (pool.length > this.popupPoolSize() && spare.length) {
+			const entry = spare.shift();
+			pool.splice(pool.indexOf(entry), 1);
+			entry.leaf.detach();
+		}
+	}
+
+	// Load the next note on screen soon, once the board has been left alone for a moment
+	// (a note loading while you scroll or tap would make the board stutter).
+	preloadSoon(delay = 500) {
+		window.clearTimeout(this.preloadTimer);
+		this.preloadTimer = window.setTimeout(() => void this.preloadStep(), delay);
+	}
+
+	async preloadStep() {
+		if (!this._loaded || this.preloading || this.importing || this.openNotes?.size) return;
+		const board = [...this.boards].find(b => b.boardEl.isShown());
+		if (!board) return;
+		if (Date.now() - (this.lastInput ?? 0) < 450) {
+			this.preloadSoon();
+			return;
+		}
+		const files = board.visibleFiles().slice(0, this.popupPoolSize());
+		const pool = (this.popupPool ??= []);
+		const next = files.find(f => !pool.some(e => e.file === f && e.leaf.view?.file === f || e.loading && e.file === f));
+		if (!next) return;
+		const entry = pool.length < this.popupPoolSize() ? this.newPopupEntry()
+			: pool.filter(e => !e.busy && !e.loading && !files.includes(e.file)).sort((a, b) => a.used - b.used)[0];
+		if (!entry) return;
+		this.preloading = true;
+		try {
+			await this.loadInto(entry, next);
+		} catch {
+			// not important: it loads when tapped
+		} finally {
+			this.preloading = false;
+		}
+		entry.used = Date.now();
+		this.preloadSoon(obsidian.Platform.isPhone ? 150 : 50);
 	}
 
 	async createBoard() {
@@ -3373,9 +3485,7 @@ class NoteModal extends obsidian.Modal {
 
 	async loadThenOpen() {
 		try {
-			this.leaf = this.plugin.takePopupLeaf();
-			this.plugin.parkPopupLeaf(this.leaf);
-			await this.leaf.openFile(this.file, { state: { mode: "source" } });
+			this.leaf = await this.plugin.takePopupLeaf(this.file);
 		} catch (err) {
 			console.error("[Full Keep Mode] Couldn't open the note:", err);
 		}
@@ -3530,6 +3640,7 @@ class NoteModal extends obsidian.Modal {
 		this.leaf = null;
 		this.contentEl.empty();
 		if (this.isNew) await this.discardIfUntouched();
+		this.plugin.preloadSoon();
 	}
 
 	// A new note closed (or left through a link) untouched is thrown away, like in Keep.
@@ -3584,6 +3695,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		this.boardController = controller;
 		this.boardEl = containerEl;
 		containerEl.addClass("fkm-board");
+		containerEl.toggleClass("fkm-narrow", obsidian.Platform.isPhone);
 		this.topEl = containerEl.createDiv({ cls: "fkm-board-top" });
 		if (plugin.settings.searchBar) this.topEl.appendChild(plugin.searchBar());
 		if (plugin.settings.takeANote) containerEl.appendChild(plugin.takeNoteBar());
@@ -3599,6 +3711,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		});
 		this.resizeObserver.observe(containerEl);
 		plugin.boards.add(this);
+		containerEl.addEventListener("scroll", () => plugin.preloadSoon(), { passive: true });
 
 		// A click opens the note in the pop-up; the card's own buttons do their thing.
 		containerEl.addEventListener("click", event => {
@@ -3635,7 +3748,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 	}
 
 	cleanup() {
-		this.leafContentEl?.removeClass("fkm-board-leaf");
+		this.leafContentEl?.removeClass("fkm-board-leaf", "fkm-has-board-bar");
 		this.plugin.boards.delete(this);
 		this.resizeObserver.disconnect();
 	}
@@ -3662,8 +3775,13 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		// The tab shows a Keep board (styles.css: no Bases toolbar, Keep's greys).
 		this.leafContentEl = this.boardEl.closest(".workspace-leaf-content") ?? this.leafContentEl;
 		this.leafContentEl?.addClass("fkm-board-leaf");
+		// Keep's top bar takes the place of Obsidian's title bar (styles.css).
+		this.leafContentEl?.toggleClass("fkm-has-board-bar", !!this.topEl.childElementCount);
 		const plugin = this.plugin;
 		const archive = this.isArchive();
+		this.boardEl.toggleClass("fkm-archive", archive);
+		const bar = this.topEl.querySelector(".fkm-board-bar");
+		if (bar) plugin.renderSearchBar(bar);
 		const files = (this.data?.data ?? []).map(entry => entry.file)
 			.filter(file => file instanceof obsidian.TFile && file.extension === "md")
 			.filter(file => archive || plugin.passes(file));
@@ -3683,7 +3801,6 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		this.cards = cards;
 		this.empty = !files.length;
 		this.layout();
-		if (files.length) plugin.warmUpPopup(files[0]);
 	}
 
 	// Keep's masonry: fixed-width columns, each card going to the shortest one.
@@ -3692,6 +3809,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		if (!width || !this.sections) return;
 		this.width = width;
 		const phone = obsidian.Platform.isPhone || width < 520;
+		this.boardEl.toggleClass("fkm-narrow", phone);
 		const gap = phone ? 8 : 16;
 		const available = width - (phone ? 16 : 32);
 		let columns;
@@ -3734,6 +3852,20 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		}
 		this.measureEl.empty();
 		this.sectionsEl.replaceChildren(...sections);
+		this.plugin.preloadSoon();
+	}
+
+	// The notes of the cards on screen (and a little below), top to bottom.
+	visibleFiles() {
+		const view = this.boardEl.getBoundingClientRect();
+		if (!view.height) return [];
+		const vault = this.plugin.app.vault;
+		return [...this.sectionsEl.querySelectorAll(".fkm-card[data-path]")]
+			.map(card => ({ card, r: card.getBoundingClientRect() }))
+			.filter(({ r }) => r.height && r.bottom > view.top && r.top < view.bottom + view.height / 4)
+			.sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left)
+			.map(({ card }) => vault.getAbstractFileByPath(card.dataset.path))
+			.filter(file => file instanceof obsidian.TFile);
 	}
 
 	// One note as a Keep card.
@@ -3748,7 +3880,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 			const pinned = plugin.isPinned(file);
 			const pin = card.createDiv({ cls: "fkm-card-pin clickable-icon", attr: { "aria-label": pinned ? "Unpin note" : "Pin note" } });
 			pin.toggleClass("is-pinned", pinned);
-			obsidian.setIcon(pin, "pin");
+			obsidian.setIcon(pin, pinned ? PINNED_ICON : PIN_ICON);
 			pin.addEventListener("click", () => void plugin.togglePin({ file }));
 		}
 		if (preview.image) {
@@ -3805,7 +3937,7 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 			if (plugin.settings.reminders) action("bell", "Remind me", () => new ReminderModal(plugin, file).open());
 			if (plugin.settings.colorButton) action("palette", "Colour", event => plugin.showColorMenu({ file }, event));
 			const archived = plugin.isArchived(file);
-			action(archived ? "archive-restore" : "archive", archived ? "Unarchive" : "Archive", () => void plugin.setArchived(file, !archived));
+			action(archived ? "archive-restore" : "archive", archived ? "Unarchive" : "Archive", () => void plugin.toggleArchive({ file }));
 			action("more-vertical", "More", event => plugin.showCardMenu(file, event));
 		}
 		return card;
@@ -3887,6 +4019,8 @@ class LabelsView extends obsidian.ItemView {
 
 	async onOpen() {
 		this.render();
+		// One side menu: a copy Obsidian brought back after the plugin was reloaded goes.
+		window.setTimeout(() => this.plugin.labelsView(), 0);
 	}
 
 	render() {
