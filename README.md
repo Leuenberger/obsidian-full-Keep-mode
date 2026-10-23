@@ -1,8 +1,8 @@
 # Full Keep Mode for Obsidian
 
-[Obsidian Community Plugin Page](https://community.obsidian.md/plugins/full-keep-mode)
+**[Obsidian Community Plugin Page](https://community.obsidian.md/plugins/full-keep-mode)**
 
-**It's just like Google Keep, but in [Obsidian](https://obsidian.md), with
+**It's just like Google Keep, but in Obsidian, with
 your notes as plain Markdown files that you own.**
 
 The board of coloured cards, pins, labels, the archive, reminders,
