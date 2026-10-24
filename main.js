@@ -1541,6 +1541,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		}
 		this.app.workspace.onLayoutReady(() => {
 			if (!this._loaded) return; // turned off (reloaded or updated) in the meantime
+			this.labelsSidebarShown = this.settings.labelsSidebar;
 			if (this.settings.labelsSidebar) void this.openLabelsView(false);
 			// The board as the home screen, like Keep: at start, and on phones instead of
 			// an empty "New tab" (e.g. after closing the board by accident).
@@ -1670,9 +1671,28 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 
 	async saveSettings() {
 		await this.saveSharedSettings();
+		this.applySettings();
+	}
+
+	// The settings changed on another device and came in with sync (data.json changed):
+	// use them here too. Without this the old ones stayed until a restart, and the next
+	// save here (e.g. of a ticked item's place) wrote them back over the new ones.
+	async onExternalSettingsChange() {
+		await this.loadSettings();
+		this.applySettings();
+	}
+
+	applySettings() {
 		this.applyBodyClasses();
 		this.renderButtons();
 		this.refreshEditors();
+		this.labelsView()?.render();
+		// The side menu opens or closes when its setting changes (not only at start).
+		if (this.app.workspace.layoutReady && this.settings.labelsSidebar !== this.labelsSidebarShown) {
+			this.labelsSidebarShown = this.settings.labelsSidebar;
+			if (this.settings.labelsSidebar) void this.openLabelsView(false);
+			else this.app.workspace.detachLeavesOfType(LABELS_VIEW);
+		}
 	}
 
 	// Redraw all open editors after a settings change.
