@@ -299,6 +299,25 @@ def main():
         click_checkbox("A")
         click_checkbox("A")
         check("…also the first item (back to the top)", body() == "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D", body())
+        # The cursor stays in its item when a tick moves items around (it used to land between
+        # a checkbox and its text, where typing broke the item open into brackets).
+        open_note("tick cursor", HEAD + "- [ ] A\n- [ ] Bee\n- [ ] Cat")
+        def tick_with_cursor(cursor_in, offset, tick):
+            return ob.js(PRELUDE + line_el(tick) + f"""
+                const d = cm.state.doc.toString(); const at = d.indexOf({json.dumps(cursor_in)}) + {offset};
+                cm.focus(); cm.dispatch({{ selection: {{ anchor: at }} }}); await wait(200);
+                el.querySelector("input.task-list-item-checkbox").click(); await wait(800);
+                const h = cm.state.selection.main.head; const line = cm.state.doc.lineAt(h);
+                return {{ line: line.text, column: h - line.from }};""")
+        other = tick_with_cursor("Cat", 1, "Bee")
+        check("ticking an item leaves the cursor where it was, in another item",
+              (other, body()) == ({"line": "- [ ] Cat", "column": 7}, "- [ ] A\n- [ ] Cat\n- [x] Bee"), (other, body()))
+        own = tick_with_cursor("Cat", 2, "Cat")
+        check("…and in the ticked item, it goes along with it, at the same place in its text", own == {"line": "- [x] Cat", "column": 8}, (own, body()))
+        gap = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc.toString(); const at = d.indexOf('- [ ] A') + 5;
+            cm.dispatch({ changes: { from: at, insert: 'x' }, userEvent: 'input.type' }); await wait(300);
+            return cm.state.doc.toString().split('\\n').find(l => l.endsWith('A'));""")
+        check("typing between a checkbox and its text goes into the text (the item never breaks open)", gap == "- [ ] xA", gap)
 
         print("Ghost parents")
         open_note("ghosts", HEAD + "- [ ] P\n\t- [ ] P1\n\t- [ ] P2\n- [ ] Q")
@@ -659,6 +678,20 @@ def main():
         check("archived and grey notes too", imported["linksFm"].get("keep_archived") is True and imported["linksFm"].get("keep_color") == "gray", imported["linksFm"])
         check("links to other Keep notes become Obsidian links", "See [[Packing]] please" in imported["links"], imported["links"])
         check("an untitled Keep note shows no title", imported["milkTitle"] == "" and "Buy milk" in imported["milk"], imported)
+        takeout = {"title": "Old style", "textContent": "From an older Takeout", "isTrashed": False, "isPinned": False, "isArchived": False,
+                   "color": "DEFAULT", "userEditedTimestampUsec": 1700000000000000, "attachments": [{"filePath": "pic.jpg", "mimetype": "image/jpeg"}]}
+        old = ob.js(PRELUDE + f"""
+            const p = app.plugins.plugins['full-keep-mode'];
+            const json = {json.dumps(json.dumps(takeout))};
+            const importedBefore = p.settings.importedAt;
+            const r = await p.importKeep({{ files: [
+                {{ path: 'Keep/Old style.json', name: 'Old style.json', text: async () => json, bytes: async () => new ArrayBuffer(0) }},
+                {{ path: 'Keep/pic.jpeg', name: 'pic.jpeg', text: async () => '', bytes: async () => new Uint8Array([255, 216, 255, 217]).buffer }}] }}, FOLDER + '/takeout');
+            p.settings.importedAt = importedBefore; await p.saveSharedSettings(); await wait(800);
+            const f = app.vault.getAbstractFileByPath(FOLDER + '/takeout/Old style.md');
+            return {{ imported: r.imported, files: r.files, missing: r.missingFiles, embeds: f ? (await app.vault.read(f)).includes('![[') : null }};""")
+        check("Takeout: older exports too, and images Takeout names .jpeg where the note says .jpg",
+              old == {"imported": 1, "files": 1, "missing": 0, "embeds": True}, old)
 
         # Pasting several lines into an item: plain lines become lines of the item, pasted
         # items stay items, whatever indentation they had before.
@@ -800,6 +833,14 @@ def main():
             card = ob.js("""const c = [...document.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card A.md'));
                 return { items: [...c.querySelectorAll('.fkm-card-item-text')].map(e => e.textContent), ticked: c.querySelector('.fkm-card-ticked')?.textContent };""")
             check("a card shows the unticked items and \"+ 1 ticked item\"", card == {"items": ["Milk", "Bread"], "ticked": "+ 1 ticked item"}, card)
+            multi = ob.js(PRELUDE + """const f = app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'); const before = await app.vault.read(f);
+                await app.vault.modify(f, before.replace('- [ ] Bread\\n', '- [ ] Bread\\n\\tbrown, sliced\\n- [x] Jam\\n\\tstrawberry\\n')); await wait(1500);
+                const c = [...document.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card A.md'));
+                const out = { items: [...c.querySelectorAll('.fkm-card-item-text')].map(e => e.innerText), text: [...c.querySelectorAll('.fkm-card-text')].map(e => e.textContent),
+                    ticked: c.querySelector('.fkm-card-ticked')?.textContent };
+                await app.vault.modify(f, before); await wait(1200); return out;""")
+            check("an item's own lines (Shift+Enter) show with it on its card, like in the note",
+                  multi == {"items": ["Milk", "Bread\nbrown, sliced"], "text": [], "ticked": "+ 2 ticked items"}, multi)
             ob.js(PRELUDE + """const c = [...document.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card A.md'));
                 c.querySelector('.fkm-card-check').click(); await wait(1500);""")
             ticked = ob.js(PRELUDE + "return await app.vault.read(app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'));")
@@ -873,6 +914,10 @@ def main():
                 return { popup: m ? m.leaf.view.file.basename : null, board: window.__fkmBoard.view.getViewType() };""")
             followed = where()
             check("a link in a pop-up opens the linked note in the pop-up; the board stays", link is not None and followed == {"popup": "Card C", "board": "bases"}, (link, followed))
+            arrows = ob.js("""const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].pop();
+                const shown = sel => { const e = m.modalEl.querySelector(sel); return !!e && getComputedStyle(e).display !== 'none'; };
+                return { back: shown('.fkm-popup-back'), obsidian: shown('.view-header-nav-buttons') };""")
+            check("…with a back arrow to the note the link was in (and no back and forward of Obsidian's)", arrows == {"back": True, "obsidian": False}, arrows)
             def escape_once():
                 ob.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
                 ob.call("Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27)
@@ -883,6 +928,89 @@ def main():
             closed = where()
             check("…back returns to the note with the link, then to the board", (back, closed) == ({"popup": "Card B", "board": "bases"}, {"popup": None, "board": "bases"}), (back, closed))
             ob.js(PRELUDE + "app.workspace.revealLeaf(window.__fkmBoard); app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(800);")
+
+            # Ctrl+click (or a middle click) on a card, like in Keep's website: a new tab with
+            # the board, and the note open over it.
+            focus_new = ob.js("return app.vault.getConfig('focusNewTab') !== false;")
+            def new_board_tab():
+                return ob.js("""const p = app.plugins.plugins['full-keep-mode']; const active = app.workspace.getMostRecentLeaf();
+                    const notes = [...(p.openNotes ?? [])].map(m => ({ note: m.leaf?.view?.file?.basename ?? null, board: m.boardLeaf === window.__fkmBoard ? 'old' : m.boardLeaf === active ? 'new' : 'other',
+                        shown: !m.containerEl.hasClass('fkm-hidden') }));
+                    return { boards: app.workspace.getLeavesOfType('bases').length, newBoardInFront: active !== window.__fkmBoard && !!p.boardOf(active), notes };""")
+            def close_new_tabs():
+                ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
+                    [...(p.openNotes ?? [])].forEach(m => m.closeForGood()); await wait(300);
+                    app.workspace.getLeavesOfType('bases').filter(l => l !== window.__fkmBoard).forEach(l => l.detach());
+                    app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(800);""")
+            boards_before = ob.js("return app.workspace.getLeavesOfType('bases').length;")
+            a = card_center("Card A")
+            ob.mouse("mouseMoved", a["x"], a["y"], 0)
+            for kind in ("mousePressed", "mouseReleased"):
+                ob.call("Input.dispatchMouseEvent", type=kind, x=a["x"], y=a["y"], button="left", buttons=1 if kind == "mousePressed" else 0, clickCount=1, modifiers=2)
+            time.sleep(2.5)
+            got = new_board_tab()
+            check("Ctrl+click on a card: a new tab with the board, the note open over it (like Keep's website)",
+                  focus_new and got == {"boards": boards_before + 1, "newBoardInFront": True, "notes": [{"note": "Card A", "board": "new", "shown": True}]}, (focus_new, got))
+            close_new_tabs()
+            boards_before = ob.js("return app.workspace.getLeavesOfType('bases').length;")
+            a = card_center("Card A")
+            for kind in ("mousePressed", "mouseReleased"):
+                ob.call("Input.dispatchMouseEvent", type=kind, x=a["x"], y=a["y"], button="middle", buttons=4 if kind == "mousePressed" else 0, clickCount=1)
+            time.sleep(2.5)
+            got = new_board_tab()
+            check("…and a middle click", got == {"boards": boards_before + 1, "newBoardInFront": True, "notes": [{"note": "Card A", "board": "new", "shown": True}]}, got)
+            close_new_tabs()
+
+            # Ctrl+click on a link in a pop-up: the same, with the linked note; the first note
+            # waits in its own tab.
+            boards_before = ob.js("return app.workspace.getLeavesOfType('bases').length;")
+            ob.js(PRELUDE + """[...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md')).querySelector('.fkm-card-title').click();
+                await wait(1500);""")
+            link = ob.js("""const m = [...document.querySelectorAll('.fkm-note-modal')].pop();
+                const el = [...m.querySelectorAll('.cm-hmd-internal-link, .internal-link')].find(e => e.textContent.includes('Card C'));
+                if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };""")
+            if link:
+                ob.mouse("mouseMoved", link["x"], link["y"], 0)
+                for kind in ("mousePressed", "mouseReleased"):
+                    ob.call("Input.dispatchMouseEvent", type=kind, x=link["x"], y=link["y"], button="left", buttons=1 if kind == "mousePressed" else 0, clickCount=1, modifiers=2)
+                time.sleep(2.5)
+            got = new_board_tab()
+            check("Ctrl+click on a link in a pop-up: a new tab with the board and the linked note over it",
+                  got == {"boards": boards_before + 1, "newBoardInFront": True, "notes": [{"note": "Card B", "board": "old", "shown": False}, {"note": "Card C", "board": "new", "shown": True}]}, (link, got))
+            close_new_tabs()
+
+            # The pop-up's editor shows note after note: Obsidian's back (its arrows, the mouse's
+            # back button, Alt+Left) must not bring an earlier note back into it.
+            stale = ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
+                const A = app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'), B = app.vault.getAbstractFileByPath(FOLDER + '/Card B.md');
+                const entry = p.popupPool.find(e => !e.busy && !e.loading) ?? p.newPopupEntry();
+                for (const e of [...p.popupPool]) if (e !== entry && e.file === B && !e.busy) { e.leaf.detach(); p.popupPool.splice(p.popupPool.indexOf(e), 1); }
+                await p.loadInto(entry, A); await p.loadInto(entry, B); // this editor showed Card A before
+                [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md')).querySelector('.fkm-card-title').click();
+                await wait(1500);
+                const m = [...(p.openNotes ?? [])].pop(); const used = m?.leaf === entry.leaf;
+                m?.leaf.history.back(); await wait(1200);
+                const now = [...(p.openNotes ?? [])].map(n => n.leaf?.view?.file?.basename);
+                [...(p.openNotes ?? [])].forEach(n => n.closeForGood()); await wait(500);
+                return { used, now };""")
+            check("Obsidian's back in a pop-up goes back like the pop-up's own (here: to the board), never to an earlier note",
+                  stale == {"used": True, "now": []}, stale)
+
+            # Behind an open note the board isn't redrawn at every save while typing; it catches
+            # up once the note is closed.
+            renders = ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode']; const board = p.boardOf(window.__fkmBoard);
+                let n = 0; const orig = board.render; board.render = function () { n++; return orig.apply(this, arguments); };
+                [...board.boardEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md')).querySelector('.fkm-card-title').click(); await wait(1500);
+                const f = app.vault.getAbstractFileByPath(FOLDER + '/Card C.md'); const before = await app.vault.read(f);
+                for (let i = 0; i < 3; i++) { await app.vault.modify(f, before + 'typing ' + i + '\\n'); await wait(700); }
+                const whileOpen = n;
+                [...(p.openNotes ?? [])].forEach(m => m.close()); await wait(1200);
+                const card = [...board.boardEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card C.md'));
+                const updated = !!card && card.textContent.includes('typing 2');
+                board.render = orig; await app.vault.modify(f, before); await wait(1000);
+                return { whileOpen, after: n - whileOpen, updated };""")
+            check("behind an open note the board isn't redrawn at every save; it catches up when the note closes",
+                  renders["whileOpen"] == 0 and renders["after"] >= 1 and renders["updated"], renders)
 
             # "Take a note…": like Keep, an empty "Title" and "Note", the cursor ready in the
             # note; a title can have any characters; untouched, the note is thrown away.

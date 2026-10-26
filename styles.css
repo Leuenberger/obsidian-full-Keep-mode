@@ -948,6 +948,13 @@ body.fkm-keep.is-phone .modal .fkm-back-button {
 	white-space: pre-wrap;
 }
 
+/* An item's own lines (Shift+Enter) under its text, like in the note. */
+.fkm-card-item-text {
+	min-width: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
 .fkm-card-blank {
 	height: 0.6em;
 }
@@ -1151,6 +1158,17 @@ body.fkm-keep .fkm-card-title {
 /* The close button gets room of its own, clear of the top bar's buttons. */
 body:not(.is-phone) .fkm-note-modal .view-header {
 	padding-inline-end: 52px;
+}
+
+/* Pop-ups: no back and forward arrows of Obsidian's (the editor shows note after note);
+   after a link, the pop-up's own back arrow to the note the link was in. */
+.fkm-note-modal .view-header-nav-buttons,
+.fkm-popup-back {
+	display: none;
+}
+
+.fkm-popup-back.is-shown {
+	display: flex;
 }
 
 /* The pop-up's editors, with the notes on screen loaded and ready. Not drawn: opening a

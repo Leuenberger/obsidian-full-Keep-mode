@@ -280,7 +280,8 @@ function writeItems(view, block, items, unit) {
 	const doc = view.state.doc;
 	const from = doc.line(block.fromLine).from;
 	const to = doc.line(block.toLine).to;
-	const insert = items.map(item => renderItem(item, unit)).join("\n");
+	const rendered = items.map(item => renderItem(item, unit));
+	const insert = rendered.join("\n");
 	const old = doc.sliceString(from, to);
 	if (insert === old) return false;
 	// Change only the part that differs, so the lines around it stay as they are.
@@ -289,11 +290,33 @@ function writeItems(view, block, items, unit) {
 	let end = 0;
 	while (end < old.length - start && end < insert.length - start
 		&& old[old.length - 1 - end] === insert[insert.length - 1 - end]) end++;
+	const changes = { from: from + start, to: to - end, insert: insert.slice(start, insert.length - end) };
+	// The cursor (and a selection) stays in the item it was in, at the same place in its
+	// text, also when the item moves (ticked, dragged, indented) - mapped through the
+	// change, it could land anywhere in the moved lines, even inside a "- [ ]".
+	const mapped = view.state.changes(changes);
+	const place = pos => {
+		if (pos < from || pos > to) return mapped.mapPos(pos);
+		const line = doc.lineAt(pos);
+		const index = items.findIndex(item => item.line <= line.number && line.number <= item.line + (item.extra?.length ?? 0));
+		if (index < 0) return mapped.mapPos(pos);
+		const row = line.number - items[index].line;
+		const lead = text => (row === 0 ? textOffset(text) : text.match(/^[ \t]*/)[0].length);
+		const column = Math.max(0, pos - line.from - lead(line.text));
+		const lines = rendered[index].split("\n");
+		const r = Math.min(row, lines.length - 1);
+		let at = from;
+		for (let i = 0; i < index; i++) at += rendered[i].length + 1;
+		for (let i = 0; i < r; i++) at += lines[i].length + 1;
+		return at + Math.min((r === row ? lead(lines[r]) : lines[r].length) + column, lines[r].length);
+	};
+	const selection = view.state.selection;
 	const restoreScroll = keepScroll(view);
 	// No user event: right after a tick, undo history merges this with the tick
 	// itself, so one undo restores the list exactly.
 	view.dispatch({
-		changes: { from: from + start, to: to - end, insert: insert.slice(start, insert.length - end) },
+		changes,
+		selection: EditorSelection.create(selection.ranges.map(r => EditorSelection.range(place(r.anchor), place(r.head))), selection.mainIndex),
 		annotations: ownEdit.of(true),
 	});
 	restoreScroll();
@@ -778,7 +801,9 @@ function checklistExtension(plugin) {
 		return line.from + line.text.match(/^[ \t]*/)[0].length;
 	};
 	const keepCursorOut = EditorState.transactionFilter.of(tr => {
-		if (!tr.selection || !livePreview(tr.state) || !enabledFor(tr.state)) return tr;
+		// Also after an edit that carries the cursor along (it could end up between the
+		// checkbox and the text, where typing breaks the item open into "- [ ]x").
+		if (!(tr.selection || tr.docChanged) || !livePreview(tr.state) || !enabledFor(tr.state)) return tr;
 		const doc = tr.newDoc;
 		let changed = false;
 		const fix = pos => {
@@ -789,9 +814,29 @@ function checklistExtension(plugin) {
 			return end;
 		};
 		// Only a plain cursor: a selection may start at a line's start (the checkbox stays drawn anyway).
-		const ranges = tr.selection.ranges.map(r => (r.empty ? EditorSelection.cursor(fix(r.head, true)) : r));
+		const sel = tr.newSelection;
+		const ranges = sel.ranges.map(r => (r.empty ? EditorSelection.cursor(fix(r.head, true)) : r));
 		if (!changed) return tr;
-		return [tr, { selection: EditorSelection.create(ranges, tr.selection.mainIndex), sequential: true }];
+		return [tr, { selection: EditorSelection.create(ranges, sel.mainIndex), sequential: true }];
+	});
+
+	// Typing right after "- [ ]" (before the space that follows it) would break the item
+	// open into plain text with brackets: what's typed there goes to the item's text.
+	const keepPrefixWhole = EditorState.transactionFilter.of(tr => {
+		if (!tr.docChanged || !tr.isUserEvent("input") || !livePreview(tr.startState) || !enabledFor(tr.startState)) return tr;
+		const doc = tr.startState.doc;
+		let count = 0;
+		let moved = null;
+		tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+			count++;
+			const line = doc.lineAt(fromA);
+			const end = prefixEnd(line);
+			if (fromA === toA && end !== null && fromA === end - 1 && doc.sliceString(fromA, end) === " ") {
+				moved = { from: end, insert: inserted.toString() };
+			}
+		});
+		if (count !== 1 || !moved) return tr;
+		return { changes: moved, selection: EditorSelection.cursor(moved.from + moved.insert.length), userEvent: "input.type" };
 	});
 
 	// Keep-style keys in checklists:
@@ -1342,7 +1387,7 @@ ${pad(depth)}${bullet} [${mark}] `;
 		}
 	});
 
-	return [decorations, currentItem, notePlaceholder, keepPropertiesClosed, keepCursorOut, selectAllInItem, tapToItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
+	return [decorations, currentItem, notePlaceholder, keepPropertiesClosed, keepCursorOut, keepPrefixWhole, selectAllInItem, tapToItem, keepKeys, keepPaste, onTick, hangMeasure, tabKey, headerButtons, swipeIndent, recordSelections];
 }
 
 // ----- settings tab -------------------------------------------------------------------------
@@ -1506,14 +1551,19 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		}
 
 		// Links in a pop-up's note open in the pop-up (see NoteModal.openLink), not in the tab
-		// behind it. With a modifier key (new tab, split) Obsidian decides, as usual.
+		// behind it. With Ctrl/Cmd (or the middle button), like in Keep's website: a new tab
+		// with the board and the linked note open over it.
 		const workspace = this.app.workspace;
 		const openLinkText = workspace.openLinkText;
 		const plugin = this;
 		const openInPopup = function (linktext, sourcePath, newLeaf, state) {
-			const popup = !newLeaf && [...(plugin.openNotes ?? [])].find(m => m.leaf?.view?.file?.path === sourcePath
+			const popup = [...(plugin.openNotes ?? [])].find(m => m.leaf?.view?.file?.path === sourcePath
 				&& !m.containerEl.hasClass("fkm-hidden") && m.containerEl.isConnected);
-			if (popup) return popup.openLink(linktext, sourcePath, state);
+			if (popup && !newLeaf) return popup.openLink(linktext, sourcePath, state);
+			const target = popup && plugin.app.metadataCache.getFirstLinkpathDest(obsidian.getLinkpath(linktext), sourcePath);
+			if (target instanceof obsidian.TFile && target.extension === "md") {
+				return plugin.openOnNewBoard(target, newLeaf === true ? "tab" : newLeaf, popup.boardLeaf);
+			}
 			return openLinkText.apply(this, arguments);
 		};
 		workspace.openLinkText = openInPopup;
@@ -3153,7 +3203,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			} catch {
 				continue;
 			}
-			if (!("createdTimestampUsec" in t) || !("isTrashed" in t)) continue; // not a Keep note
+			// A Keep note (older exports have no creation time).
+			if (!("isTrashed" in t) || !("createdTimestampUsec" in t || "userEditedTimestampUsec" in t)) continue;
 			notes.push({
 				title: t.title ?? "",
 				type: t.listContent ? "list" : "note",
@@ -3163,7 +3214,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				pinned: !!t.isPinned,
 				archived: !!t.isArchived,
 				trashed: !!t.isTrashed,
-				order: Math.round(Number(t.createdTimestampUsec ?? 0) / 1000), // Takeout has no order: newest first
+				order: Math.round(Number(t.createdTimestampUsec ?? t.userEditedTimestampUsec ?? 0) / 1000), // Takeout has no order: newest first
 				labels: (t.labels ?? []).map(l => l.name).filter(Boolean),
 				created: usec(t.createdTimestampUsec),
 				edited: usec(t.userEditedTimestampUsec),
@@ -3253,6 +3304,9 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const folder = obsidian.normalizePath(folderName || "Keep");
 		if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
 		const byName = new Map(source.files.map(f => [f.name, f]));
+		// Takeout sometimes names an image ".jpeg" where its note says ".jpg" (or the other way).
+		const stem = name => name.replace(/\.[^.]+$/, "").toLowerCase();
+		const byStem = new Map(source.files.filter(f => !f.name.endsWith(".json")).map(f => [stem(f.name), f]));
 		const result = { kind, imported: 0, skipped: 0, files: 0, missingFiles: 0, subItems: 0 };
 		// First the names of all notes, so links between Keep notes become Obsidian links.
 		const names = new Map(); // note -> file name
@@ -3290,7 +3344,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			const notePath = `${folder}/${name}.md`;
 			const embeds = [];
 			for (const mediaName of note.media ?? []) {
-				const file = byName.get(String(mediaName).split("/").pop());
+				const wanted = String(mediaName).split("/").pop();
+				const file = byName.get(wanted) ?? byStem.get(stem(wanted));
 				if (!file) {
 					result.missingFiles++;
 					continue;
@@ -3323,6 +3378,24 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			? await this.app.fileManager.createNewMarkdownFile(parent, undefined, content)
 			: await this.app.vault.create(obsidian.normalizePath(`${parent.path}/Untitled ${Date.now()}.md`), content);
 		new NoteModal(this, file, { isNew: true, initial: content, boardLeaf: this.activeBoardLeaf() }).open();
+	}
+
+	// Ctrl/Cmd+click on a card or on a link in a pop-up, like in Keep's website: the board in
+	// a new tab (or a split), with the note open over it.
+	async openOnNewBoard(file, where = "tab", boardLeaf = null) {
+		let state = boardLeaf?.getViewState?.();
+		if (state?.type !== "bases") {
+			const board = await this.findBoardFile();
+			if (!board) return;
+			state = { type: "bases", state: { file: board.path } };
+		}
+		const leaf = this.app.workspace.getLeaf(where === "split" ? "split" : "tab");
+		const focus = where === "split" || this.app.vault.getConfig("focusNewTab") !== false;
+		await leaf.setViewState({ ...state, active: focus });
+		await leaf.loadIfDeferred?.(); // a tab in the background is otherwise only set up when shown
+		if (focus) this.app.workspace.setActiveLeaf(leaf, { focus: true });
+		for (let i = 0; i < 50 && !this.boardOf(leaf); i++) await sleep(50);
+		if (this.boardOf(leaf)) new NoteModal(this, file, { boardLeaf: leaf }).open();
 	}
 
 	// A note over its board (e.g. from a reminder), so the board is right behind it.
@@ -3370,6 +3443,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	newPopupEntry() {
 		const WorkspaceLeaf = (this.app.workspace.getMostRecentLeaf() ?? this.app.workspace.getLeaf(false)).constructor;
 		const entry = { leaf: new WorkspaceLeaf(this.app), file: null, busy: false, loading: null, used: 0 };
+		// The editor shows note after note; Obsidian's own back and forward (its arrows, the
+		// mouse's back button, Alt+Left) would bring back whichever note it showed before.
+		// Back goes where the pop-up's back goes: the note a link came from, else the board.
+		const history = entry.leaf.history;
+		if (history) {
+			history.back = () => [...(this.openNotes ?? [])].find(m => m.leaf === entry.leaf)?.close();
+			history.forward = () => {};
+		}
 		(this.popupPool ??= []).push(entry);
 		this.parkPopupLeaf(entry.leaf);
 		return entry;
@@ -3383,6 +3464,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			await loading;
 		} finally {
 			if (entry.loading === loading) entry.loading = null;
+			forgetHistory(entry.leaf);
 		}
 	}
 
@@ -3461,6 +3543,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	}
 };
 
+// The pop-up's editor keeps no back-and-forward list of its own: it shows note after note
+// (the pop-up has its own way back, see NoteModal.close).
+function forgetHistory(leaf) {
+	const history = leaf?.history;
+	if (Array.isArray(history?.backHistory)) history.backHistory.length = 0;
+	if (Array.isArray(history?.forwardHistory)) history.forwardHistory.length = 0;
+}
+
 // A note in a pop-up over the board, like Keep's: a full editor. On a computer it covers
 // only its board's tab, so other tabs stay usable and it waits there while another tab
 // is in front; on a phone it takes the whole screen. A new note opens with its title
@@ -3516,6 +3606,7 @@ class NoteModal extends obsidian.Modal {
 		if (this.leaf?.view?.file) {
 			content.appendChild(this.leaf.containerEl);
 			this.plugin.renderButtons(this.file); // title, colour, labels: right away
+			this.renderBack();
 		} else {
 			content.createEl("p", { text: "Couldn't open the editor." });
 		}
@@ -3528,6 +3619,7 @@ class NoteModal extends obsidian.Modal {
 		if (this.isNew) await this.discardIfUntouched();
 		this.history.push(this.file);
 		await this.leaf.openLinkText(linktext, sourcePath, state);
+		forgetHistory(this.leaf);
 		this.showFile(this.leaf.view?.file);
 	}
 
@@ -3537,6 +3629,22 @@ class NoteModal extends obsidian.Modal {
 		this.isNew = false;
 		this.modalEl.removeClass("fkm-new-note-modal");
 		this.plugin.renderButtons(file);
+		this.renderBack();
+	}
+
+	// Computers: after following a link, a back arrow to the note the link was in (phones
+	// have Keep's back arrow already).
+	renderBack() {
+		const left = this.leaf?.view?.containerEl.querySelector(".view-header-left");
+		if (!left || obsidian.Platform.isPhone) return;
+		let back = left.querySelector(":scope > .fkm-popup-back");
+		if (!back) {
+			back = left.createDiv({ cls: "fkm-popup-back clickable-icon", attr: { "aria-label": "Back" } });
+			left.prepend(back);
+			obsidian.setIcon(back, "arrow-left");
+			back.addEventListener("click", () => [...(this.plugin.openNotes ?? [])].find(m => m.leaf?.containerEl.contains(back))?.close());
+		}
+		back.toggleClass("is-shown", !!this.history?.length && this.modalEl.isConnected);
 	}
 
 	// Back from a linked note; with none to go back to, the pop-up closes.
@@ -3544,7 +3652,10 @@ class NoteModal extends obsidian.Modal {
 		if (this.history?.length && !this.closingForGood) {
 			const previous = this.history.pop();
 			if (previous instanceof obsidian.TFile && this.app.vault.getAbstractFileByPath(previous.path)) {
-				void this.leaf.openFile(previous, { state: { mode: "source" } }).then(() => this.showFile(previous));
+				void this.leaf.openFile(previous, { state: { mode: "source" } }).then(() => {
+					forgetHistory(this.leaf);
+					this.showFile(previous);
+				});
 				return;
 			}
 		}
@@ -3615,6 +3726,12 @@ class NoteModal extends obsidian.Modal {
 		this.resizeObserver = new ResizeObserver(fit);
 		this.resizeObserver.observe(board.containerEl);
 		this.scopeActive = true;
+		// Opened for a tab in the background (Ctrl+click): it waits there, hidden.
+		if (this.app.workspace.getMostRecentLeaf() !== board && !board.containerEl.getBoundingClientRect().width) {
+			container.addClass("fkm-hidden");
+			this.app.keymap.popScope(this.scope);
+			this.scopeActive = false;
+		}
 		this.leafRef = this.app.workspace.on("active-leaf-change", leaf => {
 			if (!leaf || leaf === this.leaf) return;
 			const show = leaf === board;
@@ -3636,10 +3753,12 @@ class NoteModal extends obsidian.Modal {
 		this.resizeObserver?.disconnect();
 		if (this.leafRef) this.app.workspace.offref(this.leafRef);
 		if (this.layoutRef) this.app.workspace.offref(this.layoutRef);
+		this.leaf?.view?.containerEl.querySelector(".fkm-popup-back")?.removeClass("is-shown");
 		if (this.leaf) this.plugin.returnPopupLeaf(this.leaf);
 		this.leaf = null;
 		this.contentEl.empty();
 		if (this.isNew) await this.discardIfUntouched();
+		this.plugin.boards.forEach(board => board.renderIfStale());
 		this.plugin.preloadSoon();
 	}
 
@@ -3667,13 +3786,27 @@ function cardPreview(text, unit) {
 		.replace(/(\*\*|__|~~|==)/g, "")
 		.replace(/^#{1,6}\s+/, "")
 		.replace(/^(\s*)[-*+] (?!\[)/, "$1• ");
+	// Checklist items with their own lines (Shift+Enter), as the note has them.
+	const doc = { lines: lines.length, line: n => ({ text: lines[n - 1] }) };
+	const itemAt = new Map(); // line index -> item
+	const itemLines = new Set(); // line indexes of items' own further lines
+	for (const block of findBlocks(doc, unit)) {
+		for (const item of block.items) {
+			itemAt.set(item.line - 1, item);
+			for (let k = 1; k <= item.extra.length; k++) itemLines.add(item.line - 1 + k);
+		}
+	}
 	const items = [];
 	let ticked = 0;
 	lines.forEach((line, index) => {
-		const task = parseTask(line, unit);
-		if (task) {
-			if (task.checked) ticked++;
-			else items.push({ task: true, depth: task.depth, text: clean(task.text), line: index });
+		if (itemLines.has(index)) return;
+		const item = itemAt.get(index);
+		if (item) {
+			if (item.checked) ticked++;
+			else {
+				const text = [item.text, ...item.extra.map(l => l.trim())].map(clean).join("\n").trimEnd();
+				items.push({ task: true, depth: item.depth, text, line: index });
+			}
 		} else if (line.trim()) {
 			const textLine = clean(line).trim();
 			if (textLine) items.push({ task: false, text: textLine });
@@ -3708,17 +3841,34 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		this.resizeObserver = new ResizeObserver(() => {
 			const width = this.boardEl.clientWidth;
 			if (width && Math.abs(width - this.width) > 2) this.layout();
+			this.renderIfStale();
 		});
 		this.resizeObserver.observe(containerEl);
 		plugin.boards.add(this);
 		containerEl.addEventListener("scroll", () => plugin.preloadSoon(), { passive: true });
 
-		// A click opens the note in the pop-up; the card's own buttons do their thing.
-		containerEl.addEventListener("click", event => {
+		// A click opens the note in the pop-up; the card's own buttons do their thing. With
+		// Ctrl/Cmd (or the middle button), like in Keep's website: a new tab with the board
+		// and the note open over it.
+		const cardFile = event => {
 			const card = event.target.closest?.(".fkm-card[data-path]");
-			if (!card || event.target.closest(".fkm-card-actions, .fkm-card-pin, .fkm-card-check, a")) return;
+			if (!card || event.target.closest(".fkm-card-actions, .fkm-card-pin, .fkm-card-check, a")) return null;
 			const file = this.plugin.app.vault.getAbstractFileByPath(card.dataset.path);
-			if (file instanceof obsidian.TFile) new NoteModal(plugin, file, { boardLeaf: this.leafOf() }).open();
+			return file instanceof obsidian.TFile ? file : null;
+		};
+		containerEl.addEventListener("click", event => {
+			const file = cardFile(event);
+			if (!file) return;
+			const where = obsidian.Platform.isMobile ? false : obsidian.Keymap.isModEvent(event);
+			if (where) void plugin.openOnNewBoard(file, where, this.leafOf());
+			else new NoteModal(plugin, file, { boardLeaf: this.leafOf() }).open();
+		});
+		containerEl.addEventListener("mousedown", event => {
+			if (event.button === 1 && cardFile(event)) event.preventDefault(); // no autoscroll
+		});
+		containerEl.addEventListener("auxclick", event => {
+			const file = event.button === 1 ? cardFile(event) : null;
+			if (file) void plugin.openOnNewBoard(file, "tab", this.leafOf());
 		});
 		containerEl.addEventListener("contextmenu", event => {
 			const card = event.target.closest?.(".fkm-card[data-path]");
@@ -3734,9 +3884,24 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 	}
 
 	onDataUpdated() {
-		// During an import the boards wait, and are drawn once at the end.
+		// During an import the boards wait, and are drawn once at the end. Covered by a
+		// note's pop-up (each save while typing changes the data) or in a hidden tab, the
+		// board is drawn again once it's in sight.
 		if (this.plugin.importing) this.plugin.boardsWaiting = true;
+		else if (this.sections && this.outOfSight()) this.stale = true;
 		else this.renderSoon();
+	}
+
+	outOfSight() {
+		const leaf = this.leafOf();
+		return !this.boardEl.clientWidth || [...(this.plugin.openNotes ?? [])].some(m => m.boardLeaf === leaf || !m.boardLeaf);
+	}
+
+	// In sight again (a pop-up closed, its tab shown): drawn if the data changed meanwhile.
+	renderIfStale() {
+		if (!this.stale || this.outOfSight()) return;
+		this.stale = false;
+		this.renderSoon();
 	}
 
 	onClose() {

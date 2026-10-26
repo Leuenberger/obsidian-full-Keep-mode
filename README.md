@@ -89,6 +89,8 @@ whenever you want it.
   right-click it (or hold it on a phone) for its menu.
 - **Click a card** to open the note over the board. On a computer it covers
   just the board's tab, so you can switch tabs and come back to it.
+- **Ctrl/Cmd+click** (or middle-click) a card, or a link in an open note: a new
+  tab opens with the board and that note over it, like in Keep's website.
 - **The board is your home screen**: it opens when Obsidian starts.
 - **"Take a note…"** opens a new note with the title ready to type; closed
   untouched, it's thrown away.

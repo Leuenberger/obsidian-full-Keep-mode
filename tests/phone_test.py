@@ -312,6 +312,29 @@ def main():
         lt.check("…and the back arrow returns to the note with the link", back == "Phone", back)
         reset()
 
+        # Ticking with the keyboard up: the cursor stays in its item, at the same place in its
+        # text, and what's typed next goes there (it used to land between a checkbox and its
+        # text, and typing broke the item open into brackets).
+        print("Ticking while typing")
+        reset()
+        def tick_while_typing(cursor_in, offset, tick):
+            box = js(CM + f"""cm.focus(); const d = cm.state.doc.toString(); cm.dispatch({{ selection: {{ anchor: d.indexOf({json.dumps(cursor_in)}) + {offset} }} }}); await wait(300);
+                const l = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-item')].find(l => l.textContent.includes({json.dumps(tick)}));
+                const r = l.querySelector('input').getBoundingClientRect(); return {{ x: r.left + r.width / 2, y: r.top + r.height / 2 }};""")
+            tap(box)
+            ob.call("Input.insertText", text="X")
+            time.sleep(0.5)
+            return js(CM + """const h = cm.state.selection.main.head; const line = cm.state.doc.lineAt(h);
+                return { line: line.text.trim(), column: h - line.from - (line.text.length - line.text.trimStart().length), focused: cm.hasFocus };""")
+        own = tick_while_typing("Top two", 3, "Top two")
+        lt.check("ticking the item being typed in: the cursor goes along, typing goes on in its text",
+                 own == {"line": "- [x] TopX two", "column": 10, "focused": True}, (own, body()))
+        reset()
+        other = tick_while_typing("Sub two", 2, "Top one")
+        lt.check("ticking another item (with sub-items): the cursor stays in its item, typing goes on there",
+                 other == {"line": "- [x] SuXb two", "column": 9, "focused": True}, (other, body()))
+        reset()
+
         print("Swiping")
         base = "- [ ] Top one\n\t- [ ] Sub one\n\t\tsecond line\n\t- [ ] Sub two\n- [ ] Top two\n"
         reset()
