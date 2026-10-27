@@ -693,6 +693,51 @@ def main():
         check("Takeout: older exports too, and images Takeout names .jpeg where the note says .jpg",
               old == {"imported": 1, "files": 1, "missing": 0, "embeds": True}, old)
 
+        # Imported notes look exactly like in Keep: Keep's plain text never turns into Markdown
+        # (headings, lists, maths, code, tags...), and Keep's own formatting comes along.
+        tricky = ["# not a heading", "> not a quote", "1. one", "1. one again", "- dash", "* star", "______",
+                  "price $5 and $6", "file_name and _under_ *star* `tick` ==eq== ~~strike~~",
+                  "<b>tag</b> #hashtag [[wiki]] [x](y) [1, 4]", "    indented", "%%c%%",
+                  "https://example.com/a_b_c?x=$1 <https://x.org/a_b>", "back\\slash", "---", "a ^block", "&amp; entity"]
+        span = lambda style, text: f'<span style="{style}">{text}</span>'
+        takeout = [
+            {"title": "Tricky", "textContent": "\n".join(tricky), "isTrashed": False, "isPinned": False, "isArchived": False,
+             "color": "DEFAULT", "userEditedTimestampUsec": 1700000000000000},
+            {"title": "Formatted", "textContent": "Bold: and italic and under\nA heading", "isTrashed": False, "isPinned": False,
+             "isArchived": False, "color": "DEFAULT", "userEditedTimestampUsec": 1700000000000000,
+             "textContentHtml": "<p>" + span("font-weight:700", "Bold: ") + span("font-weight:400", "and ") + span("font-style:italic", "italic")
+                                + span("font-weight:400", " and ") + span("text-decoration:underline", "under") + "</p><h2>" + span("", "A heading") + "</h2>"},
+            {"title": "Tricky list", "isTrashed": False, "isPinned": False, "isArchived": False, "color": "DEFAULT",
+             "userEditedTimestampUsec": 1700000000000000,
+             "listContent": [{"text": "# not a heading", "textHtml": "<p>" + span("", "# not a heading") + "</p>", "isChecked": False},
+                             {"text": "1. numbered", "isChecked": False}, {"text": "bold item", "textHtml": "<p>" + span("font-weight:700", "bold item") + "</p>", "isChecked": False}]},
+        ]
+        looks = ob.js(PRELUDE + f"""
+            const p = app.plugins.plugins['full-keep-mode'];
+            const notes = {json.dumps(takeout)};
+            const importedBefore = p.settings.importedAt;
+            await p.importKeep({{ files: notes.map(n => ({{ path: 'Keep/' + n.title + '.json', name: n.title + '.json', text: async () => JSON.stringify(n), bytes: async () => new ArrayBuffer(0) }})) }}, FOLDER + '/looks');
+            p.settings.importedAt = importedBefore; await p.saveSharedSettings(); await wait(800);
+            const out = {{}};
+            for (const name of ['Tricky', 'Formatted', 'Tricky list']) {{
+                const leaf = app.workspace.getLeaf('tab');
+                await leaf.openFile(app.vault.getAbstractFileByPath(FOLDER + '/looks/' + name + '.md'), {{ state: {{ mode: 'source', source: false }} }});
+                await wait(1200);
+                const cm = leaf.view.editor.cm; cm.contentDOM.blur(); await wait(300);
+                const lines = [...cm.contentDOM.querySelectorAll('.cm-line')].filter(l => !l.closest('.cm-embed-block'));
+                out[name] = {{ text: lines.map(l => l.innerText.replace(/\\u00a0/g, ' ').trimEnd().replace(/^ (?=\\S)/, '')).filter(t => t.trim()),
+                    marks: [...cm.contentDOM.querySelectorAll('.cm-strong, .cm-em, .cm-header-2, .cm-html-embed u, u')].map(e => e.className.split(' ').find(c => /strong|em|header/.test(c)) ?? e.tagName.toLowerCase()) }};
+                leaf.detach();
+            }}
+            return out;""")
+        check("imported Keep text shows exactly as in Keep (no headings, lists, maths, code or tags out of it)",
+              looks["Tricky"]["text"] == tricky and not looks["Tricky"]["marks"], looks["Tricky"])
+        check("…Keep's bold, italic, underline and headings come along",
+              looks["Formatted"]["text"] == ["Bold: and italic and under", "A heading"]
+              and {"cm-strong", "cm-em", "cm-header", "u"} <= set(looks["Formatted"]["marks"]), looks["Formatted"])
+        check("…also in checklists", looks["Tricky list"]["text"] == ["# not a heading", "1. numbered", "bold item"]
+              and looks["Tricky list"]["marks"] == ["cm-strong"], looks["Tricky list"])
+
         # Pasting several lines into an item: plain lines become lines of the item, pasted
         # items stay items, whatever indentation they had before.
         def paste_into(name, note, line_no, text):

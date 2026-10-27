@@ -111,14 +111,16 @@ choose an export of your notes. There are two ways to get one:
 
 - **Google Takeout (easy).** At [takeout.google.com](https://takeout.google.com)
   select only Keep, download and unzip it, and choose its `Keep` folder. You get
-  your notes, ticks, colours, pins, archive, labels and images, but **not** the
-  order of your notes (newest come first) and **not** checklist sub-items (they
-  come in flat).
+  your notes, ticks, colours, pins, archive, labels, images and Keep's text
+  formatting (bold, italic, underline, headings), but **not** the order of your
+  notes (newest come first) and **not** checklist sub-items (they come in flat).
 - **The export script (everything).** Also keeps the order of your notes and the
   sub-items, and links from one Keep note to another (`keep.google.com/#NOTE/…`)
   become Obsidian links, so they keep working. It needs Python and a one-time
   sign-in code; see below. (Takeout can't do this: it leaves out the notes' IDs
-  that such links point to.)
+  that such links point to.) Keep's text formatting is only in Takeout: to have
+  it too, put Takeout's `Keep` folder into the `keep-export` folder before
+  importing.
 
 <details>
 <summary><b>How to use the export script</b></summary>
@@ -142,7 +144,9 @@ library other Keep tools use too.
 
 </details>
 
-Either way, notes in Keep's trash are left out, and reminders aren't in Google's
+Either way, your notes look just like in Keep: text that would mean something
+else in Markdown (a line starting with `#` or `1.`, a `$`, `*` or `[`) stays
+plain text. Notes in Keep's trash are left out, and reminders aren't in Google's
 exports. Import on a computer; the notes then reach your phone like any others.
 
 ## Getting started

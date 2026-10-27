@@ -102,6 +102,155 @@ const KEEP_COLORS = {
 	CERULEAN: "cerulean", PURPLE: "purple", PINK: "pink", BROWN: "brown", GRAY: "gray",
 };
 
+// ----- Keep's text as Markdown that looks exactly like it did in Keep -----------------------
+// Keep's text is plain text. As Markdown, a line starting with "# ", "> " or "1. ", a "$",
+// "*", "`", "[" or "<b>" would turn into a heading, quote, list, maths, emphasis, code, a
+// link or HTML. Those characters are escaped (web addresses stay as they are), and leading
+// spaces stay spaces (not a code block). Keep's own formatting - bold, italic, underline,
+// strikethrough and its two heading sizes - comes from Takeout's HTML.
+
+const WEB_ADDRESS_RE = /(?:https?:\/\/|www\.)[^\s<>]+/g;
+const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
+
+// Text within a line, with Markdown's special characters escaped; web addresses as they are.
+// `before` and `after`: the text around it on the line (a piece between formatting).
+function escapeKeepText(text, before = "", after = "") {
+	const full = before + text + after;
+	const addresses = [...full.matchAll(WEB_ADDRESS_RE)].map(m => [m.index, m.index + m[0].length]);
+	let out = "";
+	let a = 0;
+	for (let i = before.length; i < before.length + text.length; i++) {
+		while (a < addresses.length && addresses[a][1] <= i) a++;
+		const c = full[i];
+		if (a < addresses.length && addresses[a][0] <= i) {
+			out += c;
+			continue;
+		}
+		const prev = full[i - 1] ?? "";
+		const next = full[i + 1] ?? "";
+		if ("\\`*$[~".includes(c)) out += "\\" + c;
+		else if (c === "_" && !(WORD_CHAR_RE.test(prev) && WORD_CHAR_RE.test(next))) out += "\\_"; // emphasis, not a_word
+		else if (c === "<" && /[A-Za-z/!?]/.test(next)) out += "\\<"; // HTML, <https://...>
+		else if (c === "#" && (!prev || /\s/.test(prev)) && next && !/[\s#]/.test(next)) out += "\\#"; // a tag
+		else if (c === "&" && /^&(#\d+|#x[0-9a-f]+|\w+);/i.test(full.slice(i))) out += "\\&"; // an entity
+		else if ((c === "=" && full.includes("==")) || (c === "%" && full.includes("%%"))) out += "\\" + c; // highlight, comment
+		else if (c === "^" && /^\^[\w-]+$/.test(full.slice(i)) && /\s/.test(prev)) out += "\\^"; // a block id
+		else out += c;
+	}
+	return out;
+}
+
+// A whole line: also what Markdown reads at the start of a line (heading, quote, list,
+// divider), and leading spaces kept as spaces.
+function keepLine(markdown) {
+	const lead = markdown.match(/^[ \t]*/)[0];
+	let body = markdown.slice(lead.length);
+	if (!body) return "";
+	// (a line of only "-" or "=" is a divider, or underlines the line above into a heading)
+	if (/^(#{1,6}|>|[-+](?=\s|$))/.test(body) || /^[-=][ =-]*$/.test(body)) body = "\\" + body;
+	else body = body.replace(/^(\d{1,9})([.)])(?=\s|$)/, "$1\\$2");
+	return lead.replace(/\t/g, "    ").replace(/ /g, "\u00a0") + body;
+}
+
+function keepTextToMarkdown(text) {
+	return String(text ?? "").split("\n").map(line => keepLine(escapeKeepText(line))).join("\n");
+}
+
+// Keep's formatted text (Takeout's HTML) as Markdown. Null if its text isn't exactly
+// `plain` (Keep's plain text of the same note): then the plain text is used.
+function keepHtmlToMarkdown(html, plain) {
+	if (!html || typeof DOMParser === "undefined") return null;
+	const body = new DOMParser().parseFromString(html, "text/html").body;
+	// The text as runs of one style, with the ends of lines.
+	const tokens = [];
+	const walk = (node, style) => {
+		for (const child of node.childNodes) {
+			if (child.nodeType === Node.TEXT_NODE) {
+				if (child.data) tokens.push({ text: child.data, ...style });
+				continue;
+			}
+			if (!(child instanceof HTMLElement)) continue;
+			const tag = child.tagName;
+			if (tag === "BR") {
+				tokens.push({ br: true });
+				continue;
+			}
+			const css = child.style;
+			const weight = css.fontWeight === "bold" ? 700 : Number(css.fontWeight) || 0;
+			const next = {
+				...style,
+				bold: style.bold || tag === "B" || tag === "STRONG" || weight >= 600,
+				italic: style.italic || tag === "I" || tag === "EM" || css.fontStyle === "italic",
+				under: style.under || tag === "U" || /underline/.test(css.textDecoration),
+				strike: style.strike || tag === "S" || tag === "DEL" || /line-through/.test(css.textDecoration),
+			};
+			const block = /^(P|DIV|H[1-6]|LI)$/.test(tag);
+			if (block && tokens.length && !tokens[tokens.length - 1].end) tokens.push({ end: true });
+			if (/^H[1-6]$/.test(tag)) next.heading = Number(tag[1]);
+			walk(child, next);
+			if (block) tokens.push({ end: true, heading: next.heading });
+		}
+	};
+	walk(body, { bold: false, italic: false, under: false, strike: false, heading: 0 });
+	// Lines: a block's end ends a line; a line break too, except right before a block's end.
+	const lines = [];
+	let runs = [];
+	tokens.forEach((t, i) => {
+		if (t.br && tokens[i + 1]?.end) return;
+		if (t.br || t.end) {
+			lines.push({ runs, heading: t.heading ?? 0 });
+			runs = [];
+		} else runs.push(t);
+	});
+	if (runs.length) lines.push({ runs, heading: 0 });
+	const normal = text => text.replace(/\u00a0/g, " ").split("\n").map(l => l.trimEnd()).join("\n").replace(/\n+$/, "");
+	if (normal(lines.map(l => l.runs.map(r => r.text).join("")).join("\n")) !== normal(String(plain ?? ""))) return null;
+
+	const same = (a, b) => a.bold === b.bold && a.italic === b.italic && a.under === b.under && a.strike === b.strike;
+	const isSpace = c => !c || /\s/.test(c);
+	const isPunct = c => /[\p{P}\p{S}]/u.test(c);
+	return lines.map(({ runs: raw, heading }) => {
+		const merged = [];
+		for (const r of raw) {
+			const prev = merged[merged.length - 1];
+			if (prev && same(prev, r)) prev.text += r.text;
+			else merged.push({ ...r });
+		}
+		let out = "";
+		const lineText = merged.map(r => r.text).join("");
+		let at = 0; // where the piece starts in the line
+		merged.forEach((r, i) => {
+			const start = at;
+			at += r.text.length;
+			const around = (from, to) => [lineText.slice(0, from), lineText.slice(to)];
+			const core = r.text.trim();
+			const under = r.under && !/^(https?:\/\/|www\.)\S+$/.test(core); // Keep underlines links
+			if (!core || !(r.bold || r.italic || under || r.strike)) {
+				out += escapeKeepText(r.text, ...around(start, at));
+				return;
+			}
+			const lead = r.text.slice(0, r.text.indexOf(core));
+			const trail = r.text.slice(lead.length + core.length);
+			const coreFrom = start + lead.length;
+			let md = escapeKeepText(core, ...around(coreFrom, coreFrom + core.length));
+			if (under) md = `<u>${md}</u>`;
+			// Markdown's ** and * only work next to some characters, and not right after
+			// another piece's ("**a****b**"): else HTML's <b>, <i>, <s>.
+			const before = lead ? " " : out.slice(-1);
+			const after = trail ? " " : (merged[i + 1]?.text ?? "")[0] ?? "";
+			const opens = !isPunct(md[0]) || isSpace(before) || isPunct(before);
+			const closes = !isPunct(md[md.length - 1]) || isSpace(after) || isPunct(after);
+			const marks = opens && closes && !(!lead && /[*~>]$/.test(out));
+			if (r.strike) md = marks ? `~~${md}~~` : `<s>${md}</s>`;
+			if (r.italic) md = marks ? `*${md}*` : `<i>${md}</i>`;
+			if (r.bold) md = marks ? `**${md}**` : `<b>${md}</b>`;
+			out += escapeKeepText(lead, ...around(start, coreFrom)) + md + escapeKeepText(trail, ...around(coreFrom + core.length, at));
+		});
+		if (heading) return `${"#".repeat(Math.min(heading, 6))} ${out.trim()}`;
+		return keepLine(out);
+	}).join("\n");
+}
+
 // The board the "Create a Keep board" command sets up. Newest notes come first;
 // a note dragged to a new place gets a keep_order between its neighbours'.
 // A second view shows the archive.
@@ -3191,7 +3340,21 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		if (kind === "export") {
 			const data = JSON.parse(await full.text());
 			if (data.format !== "full-keep-mode-export") throw new Error("notes.json isn't a Full Keep Mode export.");
-			return { kind, notes: data.notes };
+			// Keep's formatting (bold, headings...) is only in Takeout: with a Takeout export in
+			// the same folder, each text gets its formatting from there.
+			const formatted = new Map(); // plain text -> Takeout's HTML of it
+			for (const file of json) {
+				if (file === full) continue;
+				try {
+					const t = JSON.parse(await file.text());
+					if (t.textContent && t.textContentHtml) formatted.set(t.textContent, t.textContentHtml);
+					for (const i of t.listContent ?? []) if (i.text && i.textHtml) formatted.set(i.text, i.textHtml);
+				} catch {
+					// not a Keep note
+				}
+			}
+			const withHtml = item => ({ ...item, html: formatted.get(item.text) ?? null, children: (item.children ?? []).map(withHtml) });
+			return { kind, notes: data.notes.map(n => ({ ...n, html: formatted.get(n.text) ?? null, items: (n.items ?? []).map(withHtml) })) };
 		}
 		if (kind !== "takeout") throw new Error("No Keep notes found in that folder.");
 		const usec = value => (value ? new Date(Number(value) / 1000).toISOString() : null);
@@ -3209,7 +3372,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				title: t.title ?? "",
 				type: t.listContent ? "list" : "note",
 				text: t.textContent ?? "",
-				items: (t.listContent ?? []).map(i => ({ text: i.text ?? "", checked: !!i.isChecked, children: [] })),
+				html: t.textContentHtml ?? null,
+				items: (t.listContent ?? []).map(i => ({ text: i.text ?? "", html: i.textHtml ?? null, checked: !!i.isChecked, children: [] })),
 				color: String(t.color ?? "DEFAULT").toUpperCase(),
 				pinned: !!t.isPinned,
 				archived: !!t.isArchived,
@@ -3324,11 +3488,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		}
 		const linkNotes = text => String(text ?? "").replace(/https:\/\/keep\.google\.com\/(?:u\/\d+\/)?#(?:NOTE|LIST)\/([\w.-]+)/g,
 			(url, id) => (byKeepId.has(id) ? `[[${byKeepId.get(id)}]]` : url));
+		// Keep's text as Markdown that looks like it did in Keep, with its links to other
+		// notes as Obsidian links.
+		const markdown = (text, html) => linkNotes(keepHtmlToMarkdown(html, text) ?? keepTextToMarkdown(text));
 		const withLinks = note => ({
 			...note,
-			text: linkNotes(note.text),
+			text: markdown(note.text, note.html),
 			items: (note.items ?? []).map(function fix(item) {
-				return { ...item, text: linkNotes(item.text), children: (item.children ?? []).map(fix) };
+				return { ...item, text: markdown(item.text, item.html), children: (item.children ?? []).map(fix) };
 			}),
 		});
 
@@ -3783,9 +3950,12 @@ function cardPreview(text, unit) {
 		.replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
 		.replace(/\[\[([^\]]*)\]\]/g, "$1")
 		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-		.replace(/(\*\*|__|~~|==)/g, "")
+		.replace(/<\/?(?:b|i|u|s|strong|em|mark)>/g, "")
 		.replace(/^#{1,6}\s+/, "")
-		.replace(/^(\s*)[-*+] (?!\[)/, "$1• ");
+		.replace(/^(\s*)[-*+] (?!\[)/, "$1• ")
+		.replace(/(^|[^\\])(\*\*\*|\*\*|__|~~|==)/g, "$1")
+		.replace(/(^|[^\\*\w])\*(?=\S)([^*]*?\S)\*(?![*\w])/g, "$1$2")
+		.replace(/\\([!-/:-@[-`{-~])/g, "$1");
 	// Checklist items with their own lines (Shift+Enter), as the note has them.
 	const doc = { lines: lines.length, line: n => ({ text: lines[n - 1] }) };
 	const itemAt = new Map(); // line index -> item
