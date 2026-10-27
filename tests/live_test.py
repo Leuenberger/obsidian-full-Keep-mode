@@ -329,6 +329,24 @@ def main():
         ob.js(PRELUDE + """const box = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ghost-child input'); box.click(); await wait(700);""")
         check("unticking it in the ghost section brings it back", body() == "- [ ] P\n→- [ ] P1\n→- [ ] P2\n- [ ] Q", body())
 
+        open_note("deep ghosts", HEAD + "- [ ] P\n\t- [ ] P1\n\t\t- [ ] P11\n\t\t- [ ] P12\n\t- [ ] P2\n\t\t- [ ] P21\n- [ ] Q")
+        click_checkbox("P12")
+        ghost = ob.js("""const s = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ticked-section');
+                         return s ? s.innerText.replace(/\\n+/g, ' | ') : null;""")
+        check("ticked third-level item shows under ghosts of both parents", ghost == "1 ticked item | P | P1 | P12", ghost)
+        click_checkbox("P2")
+        ghost = ob.js("""const s = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ticked-section');
+                         return s ? s.innerText.replace(/\\n+/g, ' | ') : null;""")
+        check("ticked second-level item brings its sub-items into the ticked section",
+              ghost == "3 ticked items | P | P1 | P12 | P2 | P21", ghost)
+        check("…while the note keeps them all in place",
+              body() == "- [ ] P\n→- [ ] P1\n→→- [ ] P11\n→→- [x] P12\n→- [x] P2\n→→- [x] P21\n- [ ] Q", body())
+
+        open_note("untick under ticked", HEAD + "- [ ] Q\n- [x] A\n\t- [x] A1\n\t- [x] A2\n\t\t- [x] A21")
+        click_checkbox("A21")
+        check("unticking a sub-item of a ticked item unticks the items it's under, and they move up",
+              body() == "- [ ] Q\n- [ ] A\n→- [ ] A2\n→→- [ ] A21\n→- [x] A1", body())
+
         print("Drag and drop (real mouse events)")
         open_note("dragging", HEAD + "- [ ] P\n\t- [ ] P1\n\t- [ ] P2\n\t- [x] P3\n- [ ] Q\n\t- [ ] Q1\n- [ ] R")
         drag("P2", -70)
@@ -459,6 +477,15 @@ def main():
         open_note("enter plain", "- [ ] A\n\t- [ ] B\n- [ ] C\n")
         after = enter_at_end_of(3)
         check("…and at the end of one without, a new item as usual", after == "- [ ] A\n\t- [ ] B\n- [ ] C\n- [ ] New\n", repr(after))
+        open_note("enter hidden subs", "- [ ] A\n\t- [x] B\n\t\t- [x] B1\n- [ ] C\n")
+        after = enter_at_end_of(1)
+        check("…but if all its sub-items are in the ticked section, a new item at its level after them",
+              after == "- [ ] A\n\t- [x] B\n\t\t- [x] B1\n- [ ] New\n- [ ] C\n", repr(after))
+        key("Tab", 9)
+        ob.call("Input.insertText", text="X")
+        time.sleep(0.4)
+        check("…and Tab on it makes it A's first sub-item, with the cursor still in it",
+              text() == "- [ ] A\n\t- [ ] NewX\n\t- [x] B\n\t\t- [x] B1\n- [ ] C\n", repr(text()))
 
         # Enter follows Keep's rules everywhere in a checklist, never Obsidian's list rules.
         enter_notes = iter(range(1, 100))

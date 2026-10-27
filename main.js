@@ -421,6 +421,82 @@ function sinkItems(items) {
 	return ordered.flatMap(g => [g.head, ...sinkItems(g.rest)]);
 }
 
+// Unticking a sub-item unticks the items it's under, like Keep: nothing unticked stays
+// under a ticked item. Returns the topmost item unticked (or `index`), whose place counts.
+function untickParents(items, index) {
+	let top = index;
+	let depth = items[index].depth;
+	for (let i = index - 1; i >= 0; i--) {
+		if (items[i].depth >= depth) continue;
+		depth = items[i].depth;
+		if (!items[i].checked) continue;
+		items[i].checked = false;
+		items[i].mark = " ";
+		top = i;
+	}
+	return top;
+}
+
+// Where the trailing run of ticked top-level items (the "ticked items" section) starts, or -1.
+function tickedStart(items, base) {
+	let start = -1;
+	for (let i = items.length - 1; i >= 0; i--) {
+		if (items[i].depth !== base) continue;
+		if (!items[i].checked) break;
+		start = i;
+	}
+	return start;
+}
+
+// The items the editor hides because they're shown in the ticked section instead.
+function ghostHidden(items, settings) {
+	const hidden = new Set();
+	if (!items.length || !settings.sinkTicked || !settings.ghostParents) return hidden;
+	const base = baseDepth(items);
+	const start = tickedStart(items, base);
+	for (const c of ghostGroups(items, base, start >= 0 ? start : items.length).hidden) {
+		for (let k = c; k < descendantsEnd(items, c); k++) hidden.add(k);
+	}
+	return hidden;
+}
+
+// Ticked sub-items of the unticked top-level items before `topEnd`, on any level: each
+// one whose parents are all unticked goes to the ticked section with everything under
+// it, below ghosts of those parents. Returns the ghost groups (one per top-level item,
+// rows in note order; `ghost` rows are the faded parents) and the items they hide.
+function ghostGroups(items, base, topEnd) {
+	const groups = [];
+	const hidden = [];
+	for (let i = 0; i < topEnd; i++) {
+		if (items[i].depth !== base || items[i].checked) continue;
+		const rows = [];
+		const parents = [{ index: i, shown: false }];
+		const end = descendantsEnd(items, i);
+		for (let c = i + 1; c < end; c++) {
+			while (parents[parents.length - 1].index !== i && items[parents[parents.length - 1].index].depth >= items[c].depth) parents.pop();
+			if (!items[c].checked) {
+				parents.push({ index: c, shown: false });
+				continue;
+			}
+			for (const p of parents) {
+				if (p.shown) continue;
+				p.shown = true;
+				const item = items[p.index];
+				rows.push({ ghost: true, depth: item.depth - base, text: item.text });
+			}
+			const subEnd = descendantsEnd(items, c);
+			hidden.push(c);
+			for (let k = c; k < subEnd; k++) {
+				const item = items[k];
+				rows.push({ ghost: false, depth: item.depth - base, line: item.line, text: item.text, checked: item.checked });
+			}
+			c = subEnd - 1;
+		}
+		if (rows.length) groups.push(rows);
+	}
+	return { groups, hidden };
+}
+
 const ownEdit = Annotation.define(); // our own edits must not trigger sorting again
 const ownSelect = Annotation.define(); // our own selections (Ctrl/Cmd+A) are left as they are
 const refreshEffect = StateEffect.define();
@@ -566,15 +642,15 @@ function checklistExtension(plugin) {
 		.replace(/\[\[([^\]]*)\]\]/g, "$1")
 		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
 
-	// Untick a sub-item shown in the ticked section; it then returns to its parent.
-	const untick = (view, child) => {
+	// Tick or untick a sub-item shown in the ticked section; unticked, it returns to its parent.
+	const toggle = (view, row) => {
 		const doc = view.state.doc;
-		if (child.line > doc.lines) return;
-		const line = doc.line(child.line);
+		if (row.line > doc.lines) return;
+		const line = doc.line(row.line);
 		const m = TASK_RE.exec(line.text);
-		if (!m || m[3] === " " || (m[4] ?? "") !== child.text) return;
+		if (!m || (m[3] !== " ") !== row.checked || (m[4] ?? "") !== row.text) return;
 		const pos = line.from + m[1].length + 3;
-		view.dispatch({ changes: { from: pos, to: pos + 1, insert: " " }, userEvent: "input" });
+		view.dispatch({ changes: { from: pos, to: pos + 1, insert: row.checked ? " " : "x" }, userEvent: "input" });
 	};
 
 	const makeGrip = view => {
@@ -740,21 +816,22 @@ function checklistExtension(plugin) {
 		toDOM(view) {
 			const el = createDiv({ cls: "fkm-ticked-section" });
 			el.createDiv({ cls: "fkm-ticked-label", text: `${this.count} ticked item${this.count === 1 ? "" : "s"}` });
-			for (const ghost of this.ghosts) {
+			for (const rows of this.ghosts) {
 				const group = el.createDiv({ cls: "fkm-ghost-group" });
-				const parent = group.createDiv({ cls: "fkm-ghost-item fkm-ghost-parent" });
-				parent.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox" }).disabled = true;
-				parent.createSpan({ cls: "fkm-ghost-text", text: plainText(ghost.parent) });
-				for (const child of ghost.children) {
-					const row = group.createDiv({ cls: "fkm-ghost-item fkm-ghost-child" });
+				for (const item of rows) {
+					const row = group.createDiv({ cls: `fkm-ghost-item ${item.ghost ? "fkm-ghost-parent" : "fkm-ghost-child"}${item.checked ? " fkm-ghost-done" : ""}` });
+					row.style.setProperty("--fkm-ghost-depth", String(item.depth));
 					const box = row.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox" });
-					box.checked = true;
-					box.setAttribute("aria-label", "Untick");
-					box.addEventListener("click", event => {
-						event.preventDefault();
-						untick(view, child);
-					});
-					row.createSpan({ cls: "fkm-ghost-text", text: plainText(child.text) });
+					if (item.ghost) box.disabled = true;
+					else {
+						box.checked = item.checked;
+						box.setAttribute("aria-label", item.checked ? "Untick" : "Tick");
+						box.addEventListener("click", event => {
+							event.preventDefault();
+							toggle(view, item);
+						});
+					}
+					row.createSpan({ cls: "fkm-ghost-text", text: plainText(item.text) });
 				}
 			}
 			el.addEventListener("mousedown", event => event.preventDefault());
@@ -783,33 +860,20 @@ function checklistExtension(plugin) {
 				return end < items.length ? items[end].line - 1 : block.toLine;
 			};
 			// The trailing run of ticked top-level items is the "ticked items" section.
-			let start = -1;
-			if (s.sinkTicked) {
-				for (let i = items.length - 1; i >= 0; i--) {
-					if (items[i].depth !== base) continue;
-					if (!items[i].checked) break;
-					start = i;
-				}
-			}
+			const start = s.sinkTicked ? tickedStart(items, base) : -1;
 			// Ticked sub-items of unticked items: hidden under their parent and shown
 			// in the ticked section instead, under a ghost of the parent.
-			const ghosts = [];
+			let ghosts = [];
 			const hidden = new Set();
 			const hiddenRanges = [];
 			if (s.sinkTicked && s.ghostParents) {
-				const topEnd = start >= 0 ? start : items.length;
-				for (let i = 0; i < topEnd; i++) {
-					if (items[i].depth !== base || items[i].checked) continue;
-					const children = [];
-					for (let c = i + 1; c < descendantsEnd(items, i); c++) {
-						if (items[c].depth !== base + 1 || !items[c].checked) continue;
-						for (let k = c; k < descendantsEnd(items, c); k++) hidden.add(k);
-						const last = hiddenRanges[hiddenRanges.length - 1];
-						if (last && last[1] === items[c].line - 1) last[1] = lastLineOf(c);
-						else hiddenRanges.push([items[c].line, lastLineOf(c)]);
-						children.push({ line: items[c].line, text: items[c].text });
-					}
-					if (children.length) ghosts.push({ parent: items[i].text, children });
+				const found = ghostGroups(items, base, start >= 0 ? start : items.length);
+				ghosts = found.groups;
+				for (const c of found.hidden) {
+					for (let k = c; k < descendantsEnd(items, c); k++) hidden.add(k);
+					const last = hiddenRanges[hiddenRanges.length - 1];
+					if (last && last[1] === items[c].line - 1) last[1] = lastLineOf(c);
+					else hiddenRanges.push([items[c].line, lastLineOf(c)]);
 				}
 			}
 			for (const [first, last] of hiddenRanges) {
@@ -850,7 +914,7 @@ function checklistExtension(plugin) {
 					else decos.push(Decoration.widget({ widget: spacer, side: 1 }).range(line.from));
 				}
 			});
-			const ghostCount = ghosts.reduce((sum, g) => sum + g.children.length, 0);
+			const ghostCount = ghosts.reduce((sum, g) => sum + g.filter(row => !row.ghost).length, 0);
 			const count = (start >= 0 ? items.length - start : 0) + ghostCount;
 			if (count) {
 				const section = new TickedSection(count, ghosts);
@@ -1083,6 +1147,24 @@ function checklistExtension(plugin) {
 				const from = Math.max(sel.from, start);
 				const atEnd = sel.to >= last.to;
 				const next = block.items[index + 1];
+				const subEnd = descendantsEnd(block.items, index);
+				if (atEnd && subEnd > index + 1) {
+					// All its sub-items are in the ticked section: the list looks flat here, so
+					// a new item at its level, after them.
+					const hidden = ghostHidden(block.items, settings());
+					let allHidden = true;
+					for (let k = index + 1; k < subEnd; k++) if (!hidden.has(k)) allHidden = false;
+					if (allHidden) {
+						const lastSub = block.items[subEnd - 1];
+						const at = doc.line(lastSub.line + lastSub.extra.length).to;
+						const changes = state.changes([
+							{ from, to: Math.max(from, sel.to) },
+							{ from: at, insert: `\n${pad(item.depth)}${bullet} [ ] ` },
+						]);
+						view.dispatch({ changes, selection: { anchor: changes.mapPos(at, 1) }, userEvent: "input", scrollIntoView: true });
+						return true;
+					}
+				}
 				const depth = atEnd && next && next.depth > item.depth ? item.depth + 1 : item.depth;
 				const mark = atEnd ? " " : item.mark; // the second half of a ticked item stays ticked
 				const insert = `
@@ -1195,7 +1277,8 @@ ${pad(depth)}${bullet} [${mark}] `;
 					items[i].mark = items[index].checked ? (items[i].checked && items[i].mark !== " " ? items[i].mark : "x") : " ";
 				}
 			}
-			writeItems(view, block, plugin.orderAfterTick(fileOf(view.state)?.path, items, index), unit);
+			const moved = s.tickSubItems && !items[index].checked ? untickParents(items, index) : index;
+			writeItems(view, block, plugin.orderAfterTick(fileOf(view.state)?.path, items, moved), unit);
 		}, 0);
 	});
 
@@ -1598,7 +1681,7 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 		containerEl.createEl("h3", { text: "Checklists" });
 		toggle("Move ticked items down", "Ticked items drop below a \"ticked items\" divider; unticking moves them back up.", "sinkTicked");
 		toggle("Ticked sub-items under a ghost parent", "A ticked sub-item of an unticked item is shown in the ticked section, under a faded copy of its parent. The note keeps it under the parent.", "ghostParents");
-		toggle("Tick sub-items along", "Ticking or unticking an item does the same to its sub-items.", "tickSubItems");
+		toggle("Tick sub-items along", "Ticking or unticking an item does the same to its sub-items, and unticking a sub-item unticks the items it's under.", "tickSubItems");
 		toggle("Drag handles", "A grip in front of each item: drag it up or down to move the item, sideways to indent or outdent it. Works with mouse and touch.", "dragHandles");
 		new obsidian.Setting(containerEl)
 			.setName("Indent levels")
@@ -2987,7 +3070,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				items[i].checked = checked;
 				items[i].mark = checked ? "x" : " ";
 			}
-			const out = this.orderAfterTick(file.path, items, index).map(item => renderItem(item, unit)).join("\n");
+			const moved = s.tickSubItems && !checked ? untickParents(items, index) : index;
+			const out = this.orderAfterTick(file.path, items, moved).map(item => renderItem(item, unit)).join("\n");
 			lines.splice(block.fromLine - 1, block.toLine - block.fromLine + 1, ...out.split("\n"));
 			return lines.join("\n");
 		});

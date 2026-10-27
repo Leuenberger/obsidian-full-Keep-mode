@@ -496,18 +496,14 @@ body.fkm-keep .cm-line.fkm-extra {
 	display: flex;
 	align-items: baseline;
 	gap: 6px;
-	padding: 1px 0 1px 20px;
+	padding: 1px 0 1px calc(20px + var(--fkm-ghost-depth, 0) * 28px);
 }
 
 .fkm-ghost-parent {
 	opacity: 0.5;
 }
 
-.fkm-ghost-child {
-	padding-left: 48px;
-}
-
-.fkm-ghost-child .fkm-ghost-text {
+.fkm-ghost-done .fkm-ghost-text {
 	text-decoration: line-through;
 	color: var(--text-muted);
 }
