@@ -1019,6 +1019,12 @@ function checklistExtension(plugin) {
 				const line = state.doc.lineAt(sel.head);
 				if (textStart(state.doc, line) !== sel.head) return false;
 				if (line.from <= bodyStart(state.doc)) return true; // the very first item: nothing to join to
+				const prev = state.doc.line(line.number - 1);
+				if (isBlank(prev.text)) {
+					// An empty line above goes away; the item keeps its checkbox.
+					view.dispatch({ changes: { from: prev.from, to: line.from }, selection: { anchor: sel.head - (line.from - prev.from) }, userEvent: "delete.backward", scrollIntoView: true });
+					return true;
+				}
 				view.dispatch({ changes: { from: line.from - 1, to: sel.head }, selection: { anchor: line.from - 1 }, userEvent: "delete.backward", scrollIntoView: true });
 				return true;
 			},
@@ -1034,6 +1040,11 @@ function checklistExtension(plugin) {
 				const next = state.doc.line(line.number + 1);
 				const end = textStart(state.doc, next);
 				if (end === null) return false;
+				if (isBlank(line.text)) {
+					// An empty line goes away; the item below keeps its checkbox.
+					view.dispatch({ changes: { from: line.from, to: next.from }, selection: { anchor: line.from + (end - next.from) }, userEvent: "delete.forward" });
+					return true;
+				}
 				view.dispatch({ changes: { from: line.to, to: end }, userEvent: "delete.forward" });
 				return true;
 			},

@@ -433,6 +433,17 @@ def main():
         key("Backspace", 8)
         check("…and Backspace at its start joins it back to the item", text() == "- [ ] A\n\t- [ ] Bsecond\n- [ ] C\n", repr(text()))
 
+        # An empty line above an item: Delete on it, or Backspace at the item's start,
+        # removes the empty line and leaves the item's checkbox alone.
+        open_note("empty line above", "\n- [ ] A\n- [ ] B\n")
+        ob.js(PRELUDE + "const cm = window.__tcLeaf.view.editor.cm; cm.focus(); cm.dispatch({ selection: { anchor: 0 } }); await wait(200);")
+        key("Delete", 46)
+        check("Delete on an empty line above an item keeps the item's checkbox", text() == "- [ ] A\n- [ ] B\n", repr(text()))
+        open_note("empty line above 2", "- [ ] A\n\n- [ ] B\n")
+        ob.js(PRELUDE + "const cm = window.__tcLeaf.view.editor.cm; cm.focus(); cm.dispatch({ selection: { anchor: cm.state.doc.line(3).from + 6 } }); await wait(200);")
+        key("Backspace", 8)
+        check("Backspace at an item's start under an empty line keeps its checkbox", text() == "- [ ] A\n- [ ] B\n", repr(text()))
+
         # Enter at the end of an item with sub-items: a new first sub-item, like Keep.
         def enter_at_end_of(line_no):
             ob.js(PRELUDE + f"const cm = window.__tcLeaf.view.editor.cm; cm.focus(); cm.dispatch({{ selection: {{ anchor: cm.state.doc.line({line_no}).to }} }}); await wait(200);")
