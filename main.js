@@ -407,22 +407,8 @@ function renderItem(item, unit) {
 	return [head, ...extra].join("\n");
 }
 
-// Like Keep: unticked items first, ticked after, on every level; sub-items travel
-// with their parent. Otherwise the order is kept.
-function sinkItems(items) {
-	if (!items.length) return [];
-	const base = baseDepth(items);
-	const groups = [];
-	for (const item of items) {
-		if (item.depth === base || !groups.length) groups.push({ head: item, rest: [] });
-		else groups[groups.length - 1].rest.push(item);
-	}
-	const ordered = [...groups.filter(g => !g.head.checked), ...groups.filter(g => g.head.checked)];
-	return ordered.flatMap(g => [g.head, ...sinkItems(g.rest)]);
-}
-
 // Unticking a sub-item unticks the items it's under, like Keep: nothing unticked stays
-// under a ticked item. Returns the topmost item unticked (or `index`), whose place counts.
+// under a ticked item. Returns the topmost item unticked (or `index`).
 function untickParents(items, index) {
 	let top = index;
 	let depth = items[index].depth;
@@ -437,64 +423,62 @@ function untickParents(items, index) {
 	return top;
 }
 
-// Where the trailing run of ticked top-level items (the "ticked items" section) starts, or -1.
-function tickedStart(items, base) {
-	let start = -1;
-	for (let i = items.length - 1; i >= 0; i--) {
-		if (items[i].depth !== base) continue;
-		if (!items[i].checked) break;
-		start = i;
-	}
-	return start;
-}
-
-// The items the editor hides because they're shown in the ticked section instead.
-function ghostHidden(items, settings) {
-	const hidden = new Set();
-	if (!items.length || !settings.sinkTicked || !settings.ghostParents) return hidden;
-	const base = baseDepth(items);
-	const start = tickedStart(items, base);
-	for (const c of ghostGroups(items, base, start >= 0 ? start : items.length).hidden) {
-		for (let k = c; k < descendantsEnd(items, c); k++) hidden.add(k);
-	}
-	return hidden;
-}
-
-// Ticked sub-items of the unticked top-level items before `topEnd`, on any level: each
-// one whose parents are all unticked goes to the ticked section with everything under
-// it, below ghosts of those parents. Returns the ghost groups (one per top-level item,
-// rows in note order; `ghost` rows are the faded parents) and the items they hide.
-function ghostGroups(items, base, topEnd) {
+// Where ticked items show, like Keep: ticking never moves an item - the note keeps every
+// item in its place, so unticking puts it back exactly there, whatever was ticked or
+// unticked in between. The editor hides a ticked item in its place and shows it in the
+// "ticked items" section below the list instead, with everything under it, below faded
+// copies of its unticked parents ("ghosts"). Returns the section's groups (one per
+// top-level item, rows in note order) and the indexes of the items hidden in the list.
+function tickedLayout(items, settings) {
 	const groups = [];
-	const hidden = [];
-	for (let i = 0; i < topEnd; i++) {
-		if (items[i].depth !== base || items[i].checked) continue;
-		const rows = [];
-		const parents = [{ index: i, shown: false }];
-		const end = descendantsEnd(items, i);
-		for (let c = i + 1; c < end; c++) {
-			while (parents[parents.length - 1].index !== i && items[parents[parents.length - 1].index].depth >= items[c].depth) parents.pop();
-			if (!items[c].checked) {
-				parents.push({ index: c, shown: false });
-				continue;
-			}
-			for (const p of parents) {
-				if (p.shown) continue;
-				p.shown = true;
-				const item = items[p.index];
-				rows.push({ ghost: true, depth: item.depth - base, text: item.text });
-			}
-			const subEnd = descendantsEnd(items, c);
-			hidden.push(c);
-			for (let k = c; k < subEnd; k++) {
-				const item = items[k];
-				rows.push({ ghost: false, depth: item.depth - base, line: item.line, text: item.text, checked: item.checked });
-			}
-			c = subEnd - 1;
+	const hidden = new Set();
+	if (!items.length || !settings.sinkTicked) return { groups, hidden };
+	const base = baseDepth(items);
+	const row = (item, ghost) => ({
+		ghost, level: item.depth, line: item.line, text: item.text, checked: item.checked,
+		extra: item.extra.map(line => line.trim()),
+	});
+	let rows = [];
+	let parents = [];
+	for (let i = 0; i < items.length;) {
+		const item = items[i];
+		if (item.depth <= base) {
+			if (rows.length) groups.push(rows);
+			rows = [];
+			parents = [];
 		}
-		if (rows.length) groups.push(rows);
+		while (parents.length && items[parents[parents.length - 1].index].depth >= item.depth) parents.pop();
+		// A ticked sub-item stays in its place if ghost parents are turned off.
+		if (!item.checked || (parents.length && !settings.ghostParents)) {
+			parents.push({ index: i, shown: false });
+			i++;
+			continue;
+		}
+		for (const parent of parents) {
+			if (parent.shown) continue;
+			parent.shown = true;
+			rows.push(row(items[parent.index], true));
+		}
+		const end = descendantsEnd(items, i);
+		for (let k = i; k < end; k++) {
+			hidden.add(k);
+			rows.push(row(items[k], false));
+		}
+		i = end;
 	}
+	if (rows.length) groups.push(rows);
 	return { groups, hidden };
+}
+
+// The line numbers of a checklist that the editor hides (ticked items, in the section).
+function hiddenLines(block, settings) {
+	const lines = new Set();
+	const { items } = block;
+	for (const i of tickedLayout(items, settings).hidden) {
+		const last = i + 1 < items.length ? items[i + 1].line - 1 : block.toLine;
+		for (let n = items[i].line; n <= last; n++) lines.add(n);
+	}
+	return lines;
 }
 
 const ownEdit = Annotation.define(); // our own edits must not trigger sorting again
@@ -636,13 +620,7 @@ function checklistExtension(plugin) {
 		return app.metadataCache.getFileCache(file)?.frontmatter?.[OPT_OUT_PROPERTY] !== false;
 	};
 
-	// Item text without link syntax, for the ghost rows.
-	const plainText = md => md
-		.replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
-		.replace(/\[\[([^\]]*)\]\]/g, "$1")
-		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-
-	// Tick or untick a sub-item shown in the ticked section; unticked, it returns to its parent.
+	// Tick or untick an item shown in the ticked section; unticked, it shows in its place again.
 	const toggle = (view, row) => {
 		const doc = view.state.doc;
 		if (row.line > doc.lines) return;
@@ -651,6 +629,53 @@ function checklistExtension(plugin) {
 		if (!m || (m[3] !== " ") !== row.checked || (m[4] ?? "") !== row.text) return;
 		const pos = line.from + m[1].length + 3;
 		view.dispatch({ changes: { from: pos, to: pos + 1, insert: row.checked ? " " : "x" }, userEvent: "input" });
+	};
+
+	// The item on a line, in its checklist.
+	const itemOnLine = (doc, lineNo) => {
+		if (lineNo > doc.lines) return null;
+		const block = findBlock(doc, lineNo, indentUnit(app));
+		const index = block ? block.items.findIndex(i => i.line === lineNo) : -1;
+		return index < 0 ? null : { block, index, item: block.items[index] };
+	};
+
+	// A ticked item's text edited in the ticked section: written into the note (its lines
+	// after the first are its extra lines, like Shift+Enter makes them).
+	const tickedEdit = Annotation.define();
+	const editTicked = (view, row, text) => {
+		const found = itemOnLine(view.state.doc, row.line);
+		if (!found || found.item.text !== row.text) return false;
+		const { item } = found;
+		const doc = view.state.doc;
+		const head = doc.line(item.line);
+		const from = head.from + textOffset(head.text);
+		const to = doc.line(item.line + item.extra.length).to;
+		const unit = indentUnit(app);
+		const inner = unit.useTab ? "\t".repeat(item.depth + 1) : " ".repeat(unit.tabSize * (item.depth + 1));
+		const [first, ...more] = text.replace(/\r/g, "").replace(/\n+$/, "").split("\n");
+		const insert = [first, ...more.map(line => inner + line)].join("\n");
+		if (doc.sliceString(from, to) === insert) return true;
+		view.dispatch({ changes: { from, to, insert }, userEvent: "input.type", annotations: tickedEdit.of(true) });
+		return true;
+	};
+
+	// Delete an item with its sub-items (Keep's x). `moveCursor`: to the end of the item above.
+	const deleteItemLine = (view, lineNo, moveCursor) => {
+		const doc = view.state.doc;
+		const found = itemOnLine(doc, lineNo);
+		if (!found) return;
+		const { block, index } = found;
+		const items = block.items;
+		const end = descendantsEnd(items, index);
+		const lastLine = end < items.length ? items[end].line - 1 : block.toLine;
+		const first = doc.line(items[index].line);
+		const last = doc.line(lastLine);
+		// The lines go, with one line break.
+		const from = first.from > 0 ? first.from - 1 : first.from;
+		const to = first.from > 0 ? last.to : Math.min(last.to + 1, doc.length);
+		const restoreScroll = keepScroll(view);
+		view.dispatch({ changes: { from, to }, selection: moveCursor ? { anchor: from } : undefined, userEvent: "delete", scrollIntoView: false });
+		restoreScroll();
 	};
 
 	const makeGrip = view => {
@@ -751,26 +776,8 @@ function checklistExtension(plugin) {
 
 	// Keep's ×, right of the item being edited (and of the one under the mouse): deletes
 	// the item with its sub-items, like Keep. Not text either.
-	const deleteItemAt = (view, el) => {
-		const { state } = view;
-		const doc = state.doc;
-		const unit = indentUnit(app);
-		const lineNo = doc.lineAt(view.posAtDOM(el)).number;
-		const block = findBlock(doc, lineNo, unit);
-		const index = block ? block.items.findIndex(i => i.line === lineNo) : -1;
-		if (index < 0) return;
-		const items = block.items;
-		const end = descendantsEnd(items, index);
-		const lastLine = end < items.length ? items[end].line - 1 : block.toLine;
-		const first = doc.line(items[index].line);
-		const last = doc.line(lastLine);
-		// The lines go, with one line break; the cursor goes to the end of the item above.
-		const from = first.from > 0 ? first.from - 1 : first.from;
-		const to = first.from > 0 ? last.to : Math.min(last.to + 1, doc.length);
-		const restoreScroll = keepScroll(view);
-		view.dispatch({ changes: { from, to }, selection: { anchor: from }, userEvent: "delete", scrollIntoView: false });
-		restoreScroll();
-	};
+	// The cursor goes to the end of the item above.
+	const deleteItemAt = (view, el) => deleteItemLine(view, view.state.doc.lineAt(view.posAtDOM(el)).number, true);
 	// Source mode: the raw "- [ ]" stays text, with a grip in front of it.
 	class GripWidget extends WidgetType {
 		eq() {
@@ -802,40 +809,129 @@ function checklistExtension(plugin) {
 		}
 	}
 
-	// The "N ticked items" divider, with ghost parents and their ticked sub-items.
+	// The "N ticked items" divider and the ticked items, like Keep's: each can be unticked,
+	// edited (its text, a tap or click on it) and deleted (the x); faded copies of the
+	// unticked items they're under ("ghosts") show where they belong.
+	const shownText = md => md
+		.replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
+		.replace(/\[\[([^\]]*)\]\]/g, "$1")
+		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+		.replace(/<\/?(?:b|i|u|s|strong|em|mark)>/g, "")
+		.replace(/(^|[^\\])(\*\*\*|\*\*|__|~~|==)/g, "$1")
+		.replace(/\\([!-/:-@[-`{-~])/g, "$1");
+	const rawText = row => [row.text, ...row.extra].join("\n");
+	const displayText = row => [row.text, ...row.extra].map(shownText).join("\n");
 	class TickedSection extends WidgetType {
-		constructor(count, ghosts) {
+		constructor(count, groups) {
 			super();
 			this.count = count;
-			this.ghosts = ghosts;
-			this.key = JSON.stringify([count, ghosts]);
+			this.groups = groups;
+			this.key = JSON.stringify([count, groups]);
+			// The rows without their text: while a ticked item's text is being edited, the
+			// section stays as it is as long as this is the same.
+			this.shape = JSON.stringify(groups.map(rows => rows.map(r => [r.ghost, r.level, r.checked])));
 		}
 		eq(other) {
 			return other.key === this.key;
 		}
 		toDOM(view) {
 			const el = createDiv({ cls: "fkm-ticked-section" });
-			el.createDiv({ cls: "fkm-ticked-label", text: `${this.count} ticked item${this.count === 1 ? "" : "s"}` });
-			for (const rows of this.ghosts) {
+			el.fkmShape = this.shape;
+			el.createDiv({ cls: "fkm-ticked-label", text: this.label() });
+			for (const rows of this.groups) {
 				const group = el.createDiv({ cls: "fkm-ghost-group" });
-				for (const item of rows) {
-					const row = group.createDiv({ cls: `fkm-ghost-item ${item.ghost ? "fkm-ghost-parent" : "fkm-ghost-child"}${item.checked ? " fkm-ghost-done" : ""}` });
-					row.style.setProperty("--fkm-ghost-depth", String(item.depth));
-					const box = row.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox" });
-					if (item.ghost) box.disabled = true;
-					else {
-						box.checked = item.checked;
-						box.setAttribute("aria-label", item.checked ? "Untick" : "Tick");
-						box.addEventListener("click", event => {
-							event.preventDefault();
-							toggle(view, item);
-						});
-					}
-					row.createSpan({ cls: "fkm-ghost-text", text: plainText(item.text) });
-				}
+				for (const row of rows) this.drawRow(group, row, view);
 			}
-			el.addEventListener("mousedown", event => event.preventDefault());
+			// Clicks on the section don't move the editor's cursor (but the text of a ticked
+			// item can be clicked into).
+			el.addEventListener("mousedown", event => {
+				if (!event.target.closest(".fkm-ticked-text")) event.preventDefault();
+			});
 			return el;
+		}
+		label() {
+			return `${this.count} ticked item${this.count === 1 ? "" : "s"}`;
+		}
+		drawRow(group, row, view) {
+			const el = group.createDiv({ cls: `fkm-ghost-item ${row.ghost ? "fkm-ghost-parent" : "fkm-ghost-child"}${row.checked ? " fkm-ghost-done" : ""}` });
+			const level = Math.min(row.level, MAX_STYLED_DEPTH);
+			el.style.setProperty("--fkm-hang", `var(--fkm-hang-${level}, ${31 + 36 * level}px)`);
+			el.fkmRow = row;
+			// Built like an item's line (see PrefixWidget), so it lines up with the items above.
+			const prefix = el.createSpan({ cls: "fkm-prefix" });
+			for (let k = 0; k < row.level; k++) prefix.createSpan({ cls: "fkm-indent-step" });
+			const box = prefix.createSpan({ cls: "task-list-label fkm-checkbox" }).createEl("input", { type: "checkbox", cls: "task-list-item-checkbox" });
+			el.createSpan({ cls: "fkm-gap", text: " " });
+			const text = el.createSpan({ cls: "fkm-ghost-text", text: displayText(row) });
+			if (row.ghost) {
+				box.disabled = true;
+				return;
+			}
+			box.checked = row.checked;
+			box.setAttribute("aria-label", row.checked ? "Untick" : "Tick");
+			box.addEventListener("click", event => {
+				event.preventDefault();
+				toggle(view, el.fkmRow);
+			});
+			// The text: shown like the other items' (links and formatting as text), edited as
+			// written in the note.
+			text.addClass("fkm-ticked-text");
+			text.setAttribute("contenteditable", "plaintext-only");
+			text.spellcheck = false;
+			text.addEventListener("focus", () => {
+				el.addClass("is-editing");
+				const raw = rawText(el.fkmRow);
+				if (text.textContent === raw) return; // the caret stays where it was clicked
+				text.textContent = raw;
+				const selection = window.getSelection();
+				selection?.selectAllChildren(text);
+				selection?.collapseToEnd();
+			});
+			text.addEventListener("blur", () => {
+				el.removeClass("is-editing");
+				text.textContent = displayText(el.fkmRow);
+			});
+			text.addEventListener("keydown", event => {
+				// Enter ends the editing (Shift+Enter: a new line in the item, as in the list).
+				if (event.key === "Enter" && !event.shiftKey) {
+					event.preventDefault();
+					text.blur();
+				}
+			});
+			text.addEventListener("input", () => {
+				const row = el.fkmRow;
+				const value = text.innerText.replace(/\n$/, "");
+				if (editTicked(view, row, value)) {
+					const [first, ...more] = value.split("\n");
+					el.fkmRow = { ...row, text: first, extra: more };
+				}
+			});
+			const x = el.createSpan({ cls: "fkm-delete clickable-icon", attr: { "aria-label": "Delete" } });
+			obsidian.setIcon(x, "x");
+			x.addEventListener("mousedown", event => event.preventDefault());
+			x.addEventListener("click", event => {
+				event.preventDefault();
+				deleteItemLine(view, el.fkmRow.line, false);
+			});
+			x.addEventListener("touchend", event => {
+				if (event.cancelable) event.preventDefault();
+				deleteItemLine(view, el.fkmRow.line, false);
+			}, { passive: false });
+		}
+		// Typing in a ticked item's text changes the note, and so the section: it's kept, with
+		// the text being typed, and only brought up to date.
+		updateDOM(dom, view) {
+			const editing = dom.querySelector(".fkm-ghost-item.is-editing");
+			if (!editing || dom.fkmShape !== this.shape) return false;
+			const els = [...dom.querySelectorAll(".fkm-ghost-item")];
+			const rows = this.groups.flat();
+			if (els.length !== rows.length) return false;
+			dom.querySelector(".fkm-ticked-label").setText(this.label());
+			els.forEach((el, i) => {
+				el.fkmRow = rows[i];
+				if (el !== editing) el.querySelector(".fkm-ghost-text").textContent = displayText(rows[i]);
+			});
+			return true;
 		}
 		ignoreEvent() {
 			return true;
@@ -855,26 +951,15 @@ function checklistExtension(plugin) {
 		for (const block of findBlocks(doc, unit)) {
 			const { items } = block;
 			const base = baseDepth(items);
-			const lastLineOf = i => {
-				const end = descendantsEnd(items, i);
-				return end < items.length ? items[end].line - 1 : block.toLine;
-			};
-			// The trailing run of ticked top-level items is the "ticked items" section.
-			const start = s.sinkTicked ? tickedStart(items, base) : -1;
-			// Ticked sub-items of unticked items: hidden under their parent and shown
-			// in the ticked section instead, under a ghost of the parent.
-			let ghosts = [];
-			const hidden = new Set();
+			// Ticked items: hidden in their place, shown in the ticked section instead.
+			const { groups, hidden } = tickedLayout(items, s);
 			const hiddenRanges = [];
-			if (s.sinkTicked && s.ghostParents) {
-				const found = ghostGroups(items, base, start >= 0 ? start : items.length);
-				ghosts = found.groups;
-				for (const c of found.hidden) {
-					for (let k = c; k < descendantsEnd(items, c); k++) hidden.add(k);
-					const last = hiddenRanges[hiddenRanges.length - 1];
-					if (last && last[1] === items[c].line - 1) last[1] = lastLineOf(c);
-					else hiddenRanges.push([items[c].line, lastLineOf(c)]);
-				}
+			for (const i of [...hidden].sort((a, b) => a - b)) {
+				const first = items[i].line;
+				const last = i + 1 < items.length ? items[i + 1].line - 1 : block.toLine;
+				const prev = hiddenRanges[hiddenRanges.length - 1];
+				if (prev && prev[1] === first - 1) prev[1] = last;
+				else hiddenRanges.push([first, last]);
 			}
 			for (const [first, last] of hiddenRanges) {
 				decos.push(Decoration.replace({ block: true }).range(doc.line(first).from, doc.line(last).to));
@@ -914,15 +999,9 @@ function checklistExtension(plugin) {
 					else decos.push(Decoration.widget({ widget: spacer, side: 1 }).range(line.from));
 				}
 			});
-			const ghostCount = ghosts.reduce((sum, g) => sum + g.filter(row => !row.ghost).length, 0);
-			const count = (start >= 0 ? items.length - start : 0) + ghostCount;
+			const count = groups.reduce((sum, rows) => sum + rows.filter(row => !row.ghost).length, 0);
 			if (count) {
-				const section = new TickedSection(count, ghosts);
-				if (start >= 0) {
-					decos.push(Decoration.widget({ widget: section, block: true, side: -1 }).range(doc.line(items[start].line).from));
-				} else {
-					decos.push(Decoration.widget({ widget: section, block: true, side: 1 }).range(doc.line(block.toLine).to));
-				}
+				decos.push(Decoration.widget({ widget: new TickedSection(count, groups), block: true, side: 1 }).range(doc.line(block.toLine).to));
 			}
 		}
 		return Decoration.set(decos, true);
@@ -1026,9 +1105,26 @@ function checklistExtension(plugin) {
 			changed = true;
 			return end;
 		};
+		// A ticked item is hidden in its place (it's shown in the ticked section): a cursor in
+		// it - say, in the item just ticked - goes to the end of the item shown above it.
+		const out = pos => {
+			const line = doc.lineAt(pos);
+			const block = findBlock(doc, line.number, indentUnit(app));
+			if (!block) return pos;
+			const hiddenSet = hiddenLines(block, settings());
+			if (!hiddenSet.has(line.number)) return pos;
+			changed = true;
+			for (let n = line.number - 1; n >= block.fromLine; n--) if (!hiddenSet.has(n)) return doc.line(n).to;
+			// Nothing shown above it in the list: the start of the first item shown below.
+			for (let n = line.number + 1; n <= block.toLine; n++) {
+				if (!hiddenSet.has(n)) return textStart(doc, doc.line(n)) ?? doc.line(n).from;
+			}
+			// Every item is ticked: just above the list.
+			return block.fromLine > 1 ? doc.line(block.fromLine - 1).to : pos;
+		};
 		// Only a plain cursor: a selection may start at a line's start (the checkbox stays drawn anyway).
 		const sel = tr.newSelection;
-		const ranges = sel.ranges.map(r => (r.empty ? EditorSelection.cursor(fix(r.head, true)) : r));
+		const ranges = sel.ranges.map(r => (r.empty ? EditorSelection.cursor(out(fix(r.head, true))) : r));
 		if (!changed) return tr;
 		return [tr, { selection: EditorSelection.create(ranges, sel.mainIndex), sequential: true }];
 	});
@@ -1083,13 +1179,23 @@ function checklistExtension(plugin) {
 				const line = state.doc.lineAt(sel.head);
 				if (textStart(state.doc, line) !== sel.head) return false;
 				if (line.from <= bodyStart(state.doc)) return true; // the very first item: nothing to join to
-				const prev = state.doc.line(line.number - 1);
+				// The line above as shown: ticked items in between are in the ticked section.
+				const block = findBlock(state.doc, line.number, indentUnit(app));
+				const hiddenSet = block ? hiddenLines(block, settings()) : new Set();
+				let n = line.number - 1;
+				while (n > 1 && hiddenSet.has(n)) n--;
+				if (n < 1 || state.doc.line(n).from < bodyStart(state.doc) || hiddenSet.has(n)) return true;
+				const prev = state.doc.line(n);
 				if (isBlank(prev.text)) {
 					// An empty line above goes away; the item keeps its checkbox.
-					view.dispatch({ changes: { from: prev.from, to: line.from }, selection: { anchor: sel.head - (line.from - prev.from) }, userEvent: "delete.backward", scrollIntoView: true });
+					view.dispatch({ changes: { from: prev.from, to: prev.to + 1 }, selection: { anchor: sel.head - (prev.to + 1 - prev.from) }, userEvent: "delete.backward", scrollIntoView: true });
 					return true;
 				}
-				view.dispatch({ changes: { from: line.from - 1, to: sel.head }, selection: { anchor: line.from - 1 }, userEvent: "delete.backward", scrollIntoView: true });
+				// The item's text (and its further lines) joins the end of that line.
+				const found = block?.items.find(i => i.line === line.number);
+				const end = found ? state.doc.line(found.line + found.extra.length).to : line.to;
+				const changes = state.changes([{ from: prev.to, insert: state.doc.sliceString(sel.head, end) }, { from: line.from - 1, to: end }]);
+				view.dispatch({ changes, selection: { anchor: prev.to }, userEvent: "delete.backward", scrollIntoView: true });
 				return true;
 			},
 		},
@@ -1101,15 +1207,29 @@ function checklistExtension(plugin) {
 				if (state.selection.ranges.length > 1 || !sel.empty || !livePreview(state) || !enabledFor(state)) return false;
 				const line = state.doc.lineAt(sel.head);
 				if (sel.head !== line.to || line.number >= state.doc.lines) return false;
-				const next = state.doc.line(line.number + 1);
+				// The line below as shown: ticked items in between are in the ticked section.
+				const block = findBlock(state.doc, line.number + 1, indentUnit(app));
+				const hiddenSet = block ? hiddenLines(block, settings()) : new Set();
+				let n = line.number + 1;
+				while (n < state.doc.lines && hiddenSet.has(n)) n++;
+				if (hiddenSet.has(n)) return true;
+				const next = state.doc.line(n);
 				const end = textStart(state.doc, next);
 				if (end === null) return false;
 				if (isBlank(line.text)) {
 					// An empty line goes away; the item below keeps its checkbox.
-					view.dispatch({ changes: { from: line.from, to: next.from }, selection: { anchor: line.from + (end - next.from) }, userEvent: "delete.forward" });
+					view.dispatch({ changes: { from: line.from, to: line.to + 1 }, selection: { anchor: end - (line.to + 1 - line.from) }, userEvent: "delete.forward" });
 					return true;
 				}
-				view.dispatch({ changes: { from: line.to, to: end }, userEvent: "delete.forward" });
+				// The next item's text (and its further lines) joins the end of this line.
+				const found = block?.items.find(i => i.line === n);
+				const nextEnd = found ? state.doc.line(found.line + found.extra.length).to : next.to;
+				if (n === line.number + 1) {
+					view.dispatch({ changes: { from: line.to, to: end }, userEvent: "delete.forward" });
+					return true;
+				}
+				const changes = state.changes([{ from: line.to, insert: state.doc.sliceString(end, nextEnd) }, { from: next.from - 1, to: nextEnd }]);
+				view.dispatch({ changes, selection: { anchor: line.to }, userEvent: "delete.forward" });
 				return true;
 			},
 		},
@@ -1151,7 +1271,7 @@ function checklistExtension(plugin) {
 				if (atEnd && subEnd > index + 1) {
 					// All its sub-items are in the ticked section: the list looks flat here, so
 					// a new item at its level, after them.
-					const hidden = ghostHidden(block.items, settings());
+					const hidden = tickedLayout(block.items, settings()).hidden;
 					let allHidden = true;
 					for (let k = index + 1; k < subEnd; k++) if (!hidden.has(k)) allHidden = false;
 					if (allHidden) {
@@ -1240,8 +1360,8 @@ ${pad(depth)}${bullet} [${mark}] `;
 		}
 	});
 
-	// Ticking or unticking an item (same line, only the tick changed): tick its
-	// sub-items along, and move it to its place - like Keep.
+	// Ticking or unticking an item (same line, only the tick changed): tick its sub-items
+	// along, untick the items it's under - like Keep. Nothing moves (see tickedLayout).
 	const onTick = EditorView.updateListener.of(update => {
 		if (!update.docChanged) return;
 		const s = settings();
@@ -1277,8 +1397,8 @@ ${pad(depth)}${bullet} [${mark}] `;
 					items[i].mark = items[index].checked ? (items[i].checked && items[i].mark !== " " ? items[i].mark : "x") : " ";
 				}
 			}
-			const moved = s.tickSubItems && !items[index].checked ? untickParents(items, index) : index;
-			writeItems(view, block, plugin.orderAfterTick(fileOf(view.state)?.path, items, moved), unit);
+			const top = s.tickSubItems && !items[index].checked ? untickParents(items, index) : index;
+			writeItems(view, block, plugin.formerPlace(fileOf(view.state)?.path, items, top), unit);
 		}, 0);
 	});
 
@@ -1427,16 +1547,7 @@ ${pad(depth)}${bullet} [${mark}] `;
 		}
 		const index = block.items.findIndex(item => item.line === n);
 		if (index < 0) return true; // an extra line of an item
-		const items = block.items.map(item => ({ ...item }));
-		const base = baseDepth(items);
-		const prev = items[index - 1];
-		const limit = plugin.maxDepth(base, prev);
-		if (!prev || items[index].depth >= limit) return true;
-		const shift = 1;
-		for (let i = index; i < descendantsEnd(items, index); i++) {
-			items[i].depth = Math.min(items[i].depth + shift, plugin.depthCap(base));
-		}
-		writeItems(view, block, settings().sinkTicked ? sinkItems(items) : items, unit);
+		plugin.shiftItem(view, n, 1);
 		return true;
 	};
 	plugin.indentChecklistItem = indentItem;
@@ -1679,7 +1790,7 @@ class FullKeepModeSettingTab extends obsidian.PluginSettingTab {
 		toggle("Drag cards", "Drag cards on the board to reorder them. On a phone: hold a card, then drag it.", "dragCards");
 
 		containerEl.createEl("h3", { text: "Checklists" });
-		toggle("Move ticked items down", "Ticked items drop below a \"ticked items\" divider; unticking moves them back up.", "sinkTicked");
+		toggle("Move ticked items down", "Ticked items show below a \"ticked items\" divider. The note keeps every item in its place, so unticking one puts it back exactly where it was, like Keep.", "sinkTicked");
 		toggle("Ticked sub-items under a ghost parent", "A ticked sub-item of an unticked item is shown in the ticked section, under a faded copy of its parent. The note keeps it under the parent.", "ghostParents");
 		toggle("Tick sub-items along", "Ticking or unticking an item does the same to its sub-items, and unticking a sub-item unticks the items it's under.", "tickSubItems");
 		toggle("Drag handles", "A grip in front of each item: drag it up or down to move the item, sideways to indent or outdent it. Works with mouse and touch.", "dragHandles");
@@ -1728,11 +1839,6 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			id: "record-selections",
 			name: "Record selections (for a bug report)",
 			callback: () => void this.toggleSelectionLog(),
-		});
-		this.addCommand({
-			id: "sort-ticked-items",
-			name: "Move ticked items down in this note",
-			editorCallback: editor => this.sortNote(editor.cm),
 		});
 		this.addCommand({
 			id: "take-a-note",
@@ -2614,19 +2720,6 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		});
 	}
 
-	// One-off: move ticked items down in every checklist of the current note.
-	sortNote(cm) {
-		if (!cm) return;
-		const unit = indentUnit(this.app);
-		// Bottom-up, so earlier lists' line numbers stay valid.
-		const blocks = findBlocks(cm.state.doc, unit).reverse();
-		let changed = 0;
-		for (const block of blocks) {
-			if (writeItems(cm, block, sinkItems(block.items.map(item => ({ ...item }))), unit)) changed++;
-		}
-		new obsidian.Notice(changed ? `Moved ticked items down in ${changed} list${changed === 1 ? "" : "s"}.` : "Nothing to move.");
-	}
-
 	// Drag an item by its grip: up/down to move it, sideways to indent/outdent.
 	// Like Keep: an item carries its sub-items along; dropped at the top level
 	// below another item, it lands after that item's sub-items; moved out in
@@ -2647,6 +2740,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const unitEnd = descendantsEnd(items, index); // the item plus its sub-items
 		const base = baseDepth(items);
 		const rest = [...items.slice(0, index), ...items.slice(unitEnd)];
+		const hidden = tickedLayout(items, this.settings).hidden; // in the ticked section
 		const original = doc.sliceString(doc.line(block.fromLine).from, doc.line(block.toLine).to);
 		const startX = event.clientX;
 		const hadFocus = view.hasFocus;
@@ -2658,6 +2752,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const itemAtLine = n => {
 			let i = 0;
 			while (i + 1 < items.length && items[i + 1].line <= n) i++;
+			while (i > 0 && hidden.has(i)) i--;
 			return i;
 		};
 
@@ -2676,20 +2771,27 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
 			const n = Math.max(block.fromLine, Math.min(block.toLine, state.doc.lineAt(pos).number));
 			const over = itemAtLine(n);
-			const lastLine = over + 1 < items.length ? items[over + 1].line - 1 : block.toLine;
+			let below = over + 1;
+			while (below < items.length && hidden.has(below)) below++;
+			const lastLine = below < items.length ? items[below].line - 1 : block.toLine;
 			const top = view.documentTop + view.lineBlockAt(state.doc.line(items[over].line).from).top;
 			const bottom = view.documentTop + view.lineBlockAt(state.doc.line(lastLine).from).bottom;
 			const after = e.clientY > (top + bottom) / 2;
 			let insertAt = over + (after ? 1 : 0);
 			if (insertAt > index && insertAt <= unitEnd) insertAt = index; // onto itself: indent only
 			const inPlace = insertAt === index;
-			const restInsert = insertAt <= index ? insertAt : insertAt - (unitEnd - index);
-			const prev = rest[restInsert - 1];
+			// The item shown above the drop place (ticked items are in the ticked section).
+			let above = insertAt - 1;
+			while (above >= 0 && (hidden.has(above) || (above >= index && above < unitEnd))) above--;
+			const prev = above < 0 ? undefined : items[above];
 			const shift = Math.round((e.clientX - startX) / INDENT_STEP);
 			const depth = Math.max(base, Math.min(this.maxDepth(base, prev), items[index].depth + shift));
+			// It lands right after that item (moved sideways in place: only to go in under it).
+			const restInsert = inPlace && depth <= items[index].depth ? index
+				: above < 0 ? 0 : above < index ? above + 1 : above + 1 - (unitEnd - index);
 			// Dropped somewhere else: never take another item's sub-items away.
 			let landAt = restInsert;
-			if (!inPlace) while (landAt < rest.length && rest[landAt].depth > depth) landAt++;
+			if (!inPlace || restInsert !== index) while (landAt < rest.length && rest[landAt].depth > depth) landAt++;
 			drop = { landAt, depth };
 			// Midway between the items: an item's line starts with the space above its text.
 			const spaceAbove = lineNo => {
@@ -2756,8 +2858,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			item.depth = i === 0 ? depth : Math.min(Math.max(item.depth + shiftBy, depth + 1), cap);
 		});
 		const others = rest.map(item => ({ ...item }));
-		const next = [...others.slice(0, landAt), ...moved, ...others.slice(landAt)];
-		writeItems(view, block, this.settings.sinkTicked ? sinkItems(next) : next, unit);
+		writeItems(view, block, [...others.slice(0, landAt), ...moved, ...others.slice(landAt)], unit);
 	}
 
 	// Indent (+1) or outdent (-1) the item on a line in place, like dragging its grip
@@ -2770,9 +2871,16 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		if (index < 0) return false;
 		const base = baseDepth(items);
 		const rest = [...items.slice(0, index), ...items.slice(descendantsEnd(items, index))];
-		const depth = Math.max(base, Math.min(this.maxDepth(base, rest[index - 1]), items[index].depth + delta));
+		// Under the item shown above it: ticked items in between are in the ticked section.
+		const hidden = tickedLayout(items, this.settings).hidden;
+		let above = index - 1;
+		while (above >= 0 && hidden.has(above)) above--;
+		const depth = Math.max(base, Math.min(this.maxDepth(base, items[above]), items[index].depth + delta));
 		if (depth === items[index].depth) return false;
-		this.placeItem(view, block, index, index, depth);
+		// Moved in under it, it comes right after it (before the hidden ones in between).
+		let landAt = depth > items[index].depth && above < index - 1 ? above + 1 : index;
+		while (landAt < index && rest[landAt].depth > depth) landAt++;
+		this.placeItem(view, block, index, landAt, depth);
 		return true;
 	}
 
@@ -2796,6 +2904,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				// note of a big vault made it slow.
 				const onBoards = new Set();
 				for (const board of this.boards) for (const entry of board.data?.data ?? []) if (entry.file) onBoards.add(entry.file);
+				// And the archived notes: like Keep, a search shows them too (below the others).
+				if (onBoards.size) for (const file of this.app.vault.getMarkdownFiles()) if (this.isArchived(file)) onBoards.add(file);
 				for (const file of onBoards.size ? onBoards : this.app.vault.getMarkdownFiles()) {
 					const haystack = [this.titleOf(file), file.basename, ...this.labelsOf(file), await this.app.vault.cachedRead(file)]
 						.join("\n").toLowerCase();
@@ -2808,6 +2918,14 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.boards.forEach(board => board.renderSoon());
 		this.renderSearchBars();
 		this.labelsView()?.render();
+	}
+
+	// Archived notes that match the search (a board shows them in a section of their own).
+	archivedMatches() {
+		const matches = this.boardFilter.text ? this.boardFilter.matches : null;
+		if (!matches) return [];
+		return [...matches].map(path => this.app.vault.getAbstractFileByPath(path))
+			.filter(file => file instanceof obsidian.TFile && this.isArchived(file));
 	}
 
 	passes(file, filter = this.boardFilter) {
@@ -2998,49 +3116,30 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		return name;
 	}
 
-	// Tick or untick a checklist item from a card, like Keep: sub-items follow, and
-	// ticked items move down (the same rules as in the editor).
-	// The order after ticking or unticking items[index]: ticked items go down, and like
-	// Keep, an unticked item goes back to where it was before it was ticked (remembered,
-	// on all synced devices); without that, it goes to the end of the unticked items.
-	orderAfterTick(path, items, index) {
-		if (!this.settings.sinkTicked) return items;
+	// Until 2.5.26 a ticked item was moved to the end of the list, and where it had been was
+	// remembered (settings.tickPlaces). An item ticked back then goes back to that place
+	// when it's unticked, once; nothing is remembered any more (ticking moves nothing now).
+	formerPlace(path, items, index) {
+		const places = this.settings.tickPlaces;
 		const item = items[index];
-		const base = baseDepth(items);
-		const sorted = sinkItems(items);
-		if (!path || item.depth !== base || !item.text.trim()) return sorted;
-		const places = (this.settings.tickPlaces ??= {});
 		const key = item.text.trim();
-		if (item.checked) {
-			let after = null;
-			for (let i = index - 1; i >= 0; i--) {
-				if (items[i].depth === base && !items[i].checked) {
-					after = items[i].text.trim();
-					break;
-				}
-			}
-			(places[path] ??= {})[key] = after;
-			this.saveTickPlaces();
-			return sorted;
-		}
-		if (!places[path] || !(key in places[path])) return sorted;
+		if (item.checked || !path || !places?.[path] || !(key in places[path])) return items;
 		const after = places[path][key];
 		delete places[path][key];
 		if (!Object.keys(places[path]).length) delete places[path];
 		this.saveTickPlaces();
-		const from = sorted.indexOf(item);
-		const moved = sorted.splice(from, descendantsEnd(sorted, from) - from);
+		const base = baseDepth(items);
+		if (item.depth !== base) return items;
+		const out = [...items];
+		const moved = out.splice(index, descendantsEnd(items, index) - index);
 		let at = 0;
 		if (after !== null) {
-			const anchor = sorted.findIndex(i => i.depth === base && !i.checked && i.text.trim() === after);
-			if (anchor < 0) {
-				sorted.splice(from, 0, ...moved); // the item it was after is gone
-				return sorted;
-			}
-			at = descendantsEnd(sorted, anchor);
+			const anchor = out.findIndex(i => i.depth === base && !i.checked && i.text.trim() === after);
+			if (anchor < 0) return items; // the item it was after is gone
+			at = descendantsEnd(out, anchor);
 		}
-		sorted.splice(at, 0, ...moved);
-		return sorted;
+		out.splice(at, 0, ...moved);
+		return out;
 	}
 
 	saveTickPlaces() {
@@ -3051,6 +3150,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		this.tickPlacesTimer = window.setTimeout(() => void this.saveSharedSettings(), 1000);
 	}
 
+	// Tick or untick a checklist item from a card, like Keep: the same rules as in the
+	// editor (sub-items along, the items it's under unticked; nothing moves).
 	async tickInFile(file, bodyLine) {
 		const unit = indentUnit(this.app);
 		const s = this.settings;
@@ -3070,8 +3171,8 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				items[i].checked = checked;
 				items[i].mark = checked ? "x" : " ";
 			}
-			const moved = s.tickSubItems && !checked ? untickParents(items, index) : index;
-			const out = this.orderAfterTick(file.path, items, moved).map(item => renderItem(item, unit)).join("\n");
+			const top = s.tickSubItems && !checked ? untickParents(items, index) : index;
+			const out = this.formerPlace(file.path, items, top).map(item => renderItem(item, unit)).join("\n");
 			lines.splice(block.fromLine - 1, block.toLine - block.fromLine + 1, ...out.split("\n"));
 			return lines.join("\n");
 		});
@@ -3539,8 +3640,7 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 				for (const child of item.children ?? []) add(child, Math.min(depth + 1, 1));
 			};
 			for (const item of note.items ?? []) add(item, 0);
-			const ordered = this.settings.sinkTicked ? sinkItems(items) : items;
-			if (ordered.length) body.push(ordered.map(item => renderItem(item, unit)).join("\n"));
+			if (items.length) body.push(items.map(item => renderItem(item, unit)).join("\n"));
 		} else if (note.text) {
 			body.push(note.text);
 		}
@@ -3889,6 +3989,7 @@ class NoteModal extends obsidian.Modal {
 			content.appendChild(this.leaf.containerEl);
 			this.plugin.renderButtons(this.file); // title, colour, labels: right away
 			this.renderBack();
+			this.searchKeys();
 		} else {
 			content.createEl("p", { text: "Couldn't open the editor." });
 		}
@@ -3912,6 +4013,34 @@ class NoteModal extends obsidian.Modal {
 		this.modalEl.removeClass("fkm-new-note-modal");
 		this.plugin.renderButtons(file);
 		this.renderBack();
+	}
+
+	// Ctrl/Cmd+F (or whatever keys "Search current file" and "Search and replace in current
+	// file" have): the search in this note. Obsidian's own command would look in the tab
+	// behind the pop-up - the board's - and do nothing.
+	searchKeys() {
+		const hotkeys = this.app.hotkeyManager;
+		const commands = [["editor:open-search", false, "F"], ["editor:open-search-replace", true, "H"]];
+		for (const [id, replace, letter] of commands) {
+			const keys = hotkeys?.getHotkeys?.(id) ?? hotkeys?.getDefaultHotkeys?.(id) ?? [{ modifiers: ["Mod"], key: letter }];
+			for (const key of keys) {
+				this.scope.register(key.modifiers, key.key, () => {
+					this.searchInNote(replace);
+					return false;
+				});
+			}
+		}
+	}
+
+	searchInNote(replace) {
+		const view = this.leaf?.view;
+		if (!view) return;
+		if (typeof view.showSearch === "function") {
+			view.showSearch(replace);
+			return;
+		}
+		this.app.workspace.setActiveLeaf(this.leaf, { focus: true });
+		this.app.commands.executeCommandById(replace ? "editor:open-search-replace" : "editor:open-search");
 	}
 
 	// Computers: after following a link, a back arrow to the note the link was in (phones
@@ -4235,21 +4364,28 @@ class KeepBoardView extends (obsidian.BasesView ?? class {}) {
 		const files = (this.data?.data ?? []).map(entry => entry.file)
 			.filter(file => file instanceof obsidian.TFile && file.extension === "md")
 			.filter(file => archive || plugin.passes(file));
-		const previews = await Promise.all(files.map(file => this.preview(file)));
+		// Searching, like Keep: the archived notes that match too, in a section at the end.
+		const archived = archive ? [] : plugin.archivedMatches().filter(file => !files.includes(file) && plugin.passes(file));
+		const all = [...files, ...archived];
+		const previews = await Promise.all(all.map(file => this.preview(file)));
 		if (token !== this.renderToken) return; // a newer render is on its way
-		const cards = new Map(files.map((file, i) => [file, this.card(file, previews[i])]));
+		const cards = new Map(all.map((file, i) => [file, this.card(file, previews[i])]));
 		const byOrder = (a, b) => plugin.boardOrder(b) - plugin.boardOrder(a);
+		const byEdit = (a, b) => b.stat.mtime - a.stat.mtime;
 		if (archive) {
-			this.sections = [{ title: null, files: files.slice().sort((a, b) => b.stat.mtime - a.stat.mtime) }];
+			this.sections = [{ title: null, files: files.slice().sort(byEdit) }];
 		} else {
 			const pinned = files.filter(f => plugin.isPinned(f)).sort(byOrder);
 			const others = files.filter(f => !plugin.isPinned(f)).sort(byOrder);
-			this.sections = pinned.length
-				? [{ title: "Pinned", files: pinned }, { title: others.length ? "Others" : null, files: others }]
-				: [{ title: null, files: others }];
+			const named = pinned.length || archived.length;
+			this.sections = [
+				{ title: pinned.length ? "Pinned" : null, files: pinned },
+				{ title: named && others.length ? "Others" : null, files: others },
+				{ title: "Archive", files: archived.sort(byEdit) },
+			];
 		}
 		this.cards = cards;
-		this.empty = !files.length;
+		this.empty = !all.length;
 		this.layout();
 	}
 

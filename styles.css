@@ -475,10 +475,23 @@ body.fkm-keep .cm-line.fkm-extra {
 
 /* ----- "N ticked items" divider and ghost parents ----- */
 /* Space around the divider as padding: Obsidian sets every margin in the editor to 0. */
+/* The ticked items are built and measured like the items above (see .cm-line.fkm-task):
+   checkboxes in line with theirs, the text struck through. */
 .fkm-ticked-section {
+	--list-indent: 1.5em;
+	--checkbox-size: 0.95em;
+	--fkm-item-space: 0.45em;
 	padding: 6px 0 2px;
+	line-height: 1.2;
 	user-select: none;
 	-webkit-user-select: none;
+}
+
+.is-phone .fkm-ticked-section {
+	--list-indent: 30px;
+	--checkbox-size: 18px;
+	--fkm-item-space: 12px;
+	line-height: 1.15;
 }
 
 .fkm-ticked-label {
@@ -493,10 +506,36 @@ body.fkm-keep .cm-line.fkm-extra {
 }
 
 .fkm-ghost-item {
-	display: flex;
-	align-items: baseline;
-	gap: 6px;
-	padding: 1px 0 1px calc(20px + var(--fkm-ghost-depth, 0) * 28px);
+	position: relative;
+	padding: var(--fkm-item-space) 36px var(--list-spacing, 0) var(--fkm-hang);
+	text-indent: calc(-1 * var(--fkm-hang));
+}
+
+.fkm-ghost-text {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+/* The space after the checkbox, as in the lines (the row's hanging indent would squeeze it). */
+.fkm-ghost-item .fkm-gap {
+	text-indent: 0;
+}
+
+/* A ticked item's text can be clicked or tapped into and edited, like Keep's. */
+.fkm-ticked-text {
+	cursor: text;
+	outline: none;
+	-webkit-user-select: text;
+	user-select: text;
+}
+
+.fkm-ghost-item .fkm-delete {
+	top: var(--fkm-item-space);
+}
+
+.fkm-ghost-child:focus-within .fkm-delete,
+body:not(.is-mobile) .fkm-ghost-child:hover .fkm-delete {
+	visibility: visible;
 }
 
 .fkm-ghost-parent {

@@ -43,7 +43,7 @@ whenever you want it.
 | Note colours | ✓ Keep's colours, light and dark |
 | Pin, archive (with Undo), reminders | ✓ on the card and in the note |
 | Labels, side menu (☰), "Edit labels" | ✓ |
-| Search bar, "Take a note…", "New list" | ✓ |
+| Search bar, "Take a note…", "New list" | ✓ archived notes that match show in a section of their own |
 | Drag cards to reorder, tick items on a card | ✓ |
 | Checklists: ticked items move down, sub-items, two levels | ✓ Keep's exact rules |
 | Drag items, swipe sideways to indent (phone) | ✓ |
@@ -59,7 +59,9 @@ whenever you want it.
 <summary><b>Everything checklists do</b></summary>
 
 - **Ticked items move down** below a "*N* ticked items" divider, with their
-  sub-items. Untick one and it moves back up.
+  sub-items. Untick one and it goes back exactly where it was, like in Keep:
+  the note keeps every item in its place, ticked or not. Ticked items can be
+  edited there and deleted with their ×.
 - **Ghost parents.** A ticked sub-item of an unfinished item shows in the
   ticked section under a faded copy of its parent, like in Keep.
 - **Drag and drop.** Drag an item's grip up or down to move it (with its
@@ -177,8 +179,8 @@ one note, give it the property `full-keep-mode: false`.
 
 Commands: **Take a note**, **Take a note as a checklist**, **Labels of this
 note**, **Show or hide checkboxes in this note**, **Open the labels side menu**,
-**Create a Keep board**, **Import from Google Keep**, and **Move ticked items
-down in this note**.
+**Create a Keep board** and **Import from Google Keep**. In an open note,
+Ctrl/Cmd+F searches the note.
 
 Everything is **plain Markdown**: ordinary `- [ ]` / `- [x]` lists, and
 properties in each note: `keep_pinned`, `keep_color`, `keep_order` (the place

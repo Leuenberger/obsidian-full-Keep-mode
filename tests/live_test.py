@@ -118,12 +118,27 @@ def line_el(label):
 
 
 def click_checkbox(label):
-    ob.js(PRELUDE + line_el(label) + """
-    el.querySelector("input.task-list-item-checkbox").click();
+    """The item's checkbox: in the list, or (ticked) in the ticked section."""
+    ob.js(PRELUDE + f"""
+    const cm = window.__tcLeaf.view.editor.cm;
+    const line = [...cm.contentDOM.querySelectorAll(".cm-line")].find(e => e.textContent.trim().endsWith({json.dumps(label)}));
+    const row = [...cm.contentDOM.querySelectorAll(".fkm-ghost-child")].find(e => e.innerText.trim() === {json.dumps(label)});
+    (line?.querySelector("input.task-list-item-checkbox") ?? row.querySelector("input")).click();
     await wait(700);
-    cm.dispatch({ selection: { anchor: cm.state.doc.length } });
+    cm.dispatch({{ selection: {{ anchor: cm.state.doc.length }} }});
     await wait(300);
     """)
+
+
+def displayed():
+    """What the note shows: its items (→ per level), then "--" and the ticked section
+    (✓ ticked, ghosts in brackets)."""
+    return ob.js("""const cm = window.__tcLeaf.view.editor.cm;
+        const level = l => Number(/fkm-depth-(\\d)/.exec(l.className)?.[1] ?? 0);
+        const list = [...cm.contentDOM.querySelectorAll('.cm-line.fkm-item')].map(l => '→'.repeat(level(l)) + l.innerText.trim());
+        const rows = [...cm.contentDOM.querySelectorAll('.fkm-ghost-item')].map(r => '→'.repeat(r.querySelectorAll('.fkm-indent-step').length)
+            + (r.classList.contains('fkm-ghost-parent') ? '(' + r.innerText.trim() + ')' : (r.querySelector('input').checked ? '✓' : '') + r.innerText.trim()));
+        return list.join('\\n') + (rows.length ? '\\n--\\n' + rows.join('\\n') : '');""")
 
 
 def drag(label, dx, target=None, lower=True):
@@ -284,21 +299,29 @@ def main():
         start = "- [ ] A\n- [ ] B\n\t- [ ] B1\n- [ ] C"
         open_note("ticking", HEAD + start)
         click_checkbox("A")
-        check("ticked item moves below the others", body() == "- [ ] B\n→- [ ] B1\n- [ ] C\n- [x] A", body())
+        check("a ticked item shows below the others, in the ticked section", displayed() == "B\n→B1\nC\n--\n✓A", displayed())
+        check("…while the note keeps it in its place (ticking moves nothing)", body() == "- [x] A\n- [ ] B\n→- [ ] B1\n- [ ] C", body())
         section = ob.js("return [...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.fkm-ticked-label')].map(e => e.textContent);")
         check("divider shows \"1 ticked item\"", section == ["1 ticked item"], section)
         undo()
         check("one undo restores the list exactly", body() == start.replace("\t", "→"), body())
         click_checkbox("B")
-        check("ticking a parent ticks its sub-items and moves them along", body() == "- [ ] A\n- [ ] C\n- [x] B\n→- [x] B1", body())
-        open_note("untick place", HEAD + "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D")
-        click_checkbox("B")
-        moved_down = body()
-        click_checkbox("B")
-        check("unticking an item puts it back where it was, like Keep", (moved_down, body()) == ("- [ ] A\n- [ ] C\n- [ ] D\n- [x] B", "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D"), (moved_down, body()))
-        click_checkbox("A")
-        click_checkbox("A")
-        check("…also the first item (back to the top)", body() == "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D", body())
+        check("ticking a parent ticks its sub-items, which go along to the ticked section",
+              (displayed(), body()) == ("A\nC\n--\n✓B\n→✓B1", "- [ ] A\n- [x] B\n→- [x] B1\n- [ ] C"), (displayed(), body()))
+        # Like Keep: ticking and unticking items and sub-items in any order brings back the
+        # exact order there was.
+        order = "- [ ] A\n- [ ] B\n\t- [ ] B1\n\t- [ ] B2\n- [ ] C\n\t- [ ] C1\n- [ ] D\n- [ ] E"
+        open_note("tick order", HEAD + order)
+        before = displayed()
+        for label in ["B1", "D", "A", "C1", "E", "B2"]:
+            click_checkbox(label)
+        middle = displayed()
+        for label in ["E", "A", "B2", "D", "C1", "B1"]:
+            click_checkbox(label)
+        check("ticked in some order, the items show in the ticked section in the list's order",
+              middle == "B\nC\n--\n✓A\n(B)\n→✓B1\n→✓B2\n(C)\n→✓C1\n✓D\n✓E", middle)
+        check("…and unticked in another, every item is back exactly where it was, like Keep",
+              (displayed(), body()) == (before, order.replace("\t", "→")), (displayed(), body()))
         # The cursor stays in its item when a tick moves items around (it used to land between
         # a checkbox and its text, where typing broke the item open into brackets).
         open_note("tick cursor", HEAD + "- [ ] A\n- [ ] Bee\n- [ ] Cat")
@@ -311,9 +334,9 @@ def main():
                 return {{ line: line.text, column: h - line.from }};""")
         other = tick_with_cursor("Cat", 1, "Bee")
         check("ticking an item leaves the cursor where it was, in another item",
-              (other, body()) == ({"line": "- [ ] Cat", "column": 7}, "- [ ] A\n- [ ] Cat\n- [x] Bee"), (other, body()))
+              (other, body()) == ({"line": "- [ ] Cat", "column": 7}, "- [ ] A\n- [x] Bee\n- [ ] Cat"), (other, body()))
         own = tick_with_cursor("Cat", 2, "Cat")
-        check("…and in the ticked item, it goes along with it, at the same place in its text", own == {"line": "- [x] Cat", "column": 8}, (own, body()))
+        check("…ticking the item it's in, it goes to the end of the item shown above", own == {"line": "- [ ] A", "column": 7}, (own, body()))
         gap = ob.js(PRELUDE + """const cm = window.__tcLeaf.view.editor.cm; const d = cm.state.doc.toString(); const at = d.indexOf('- [ ] A') + 5;
             cm.dispatch({ changes: { from: at, insert: 'x' }, userEvent: 'input.type' }); await wait(300);
             return cm.state.doc.toString().split('\\n').find(l => l.endsWith('A'));""")
@@ -322,30 +345,42 @@ def main():
         print("Ghost parents")
         open_note("ghosts", HEAD + "- [ ] P\n\t- [ ] P1\n\t- [ ] P2\n- [ ] Q")
         click_checkbox("P2")
-        ghost = ob.js("""const s = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ticked-section');
-                         return s ? s.innerText.replace(/\\n+/g, ' | ') : null;""")
-        check("ticked sub-item shows under a ghost parent", ghost == "1 ticked item | P | P2", ghost)
+        check("ticked sub-item shows under a ghost parent", displayed() == "P\n→P1\nQ\n--\n(P)\n→✓P2", displayed())
         check("…while the note keeps it under its parent", body() == "- [ ] P\n→- [ ] P1\n→- [x] P2\n- [ ] Q", body())
         ob.js(PRELUDE + """const box = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ghost-child input'); box.click(); await wait(700);""")
         check("unticking it in the ghost section brings it back", body() == "- [ ] P\n→- [ ] P1\n→- [ ] P2\n- [ ] Q", body())
 
         open_note("deep ghosts", HEAD + "- [ ] P\n\t- [ ] P1\n\t\t- [ ] P11\n\t\t- [ ] P12\n\t- [ ] P2\n\t\t- [ ] P21\n- [ ] Q")
         click_checkbox("P12")
-        ghost = ob.js("""const s = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ticked-section');
-                         return s ? s.innerText.replace(/\\n+/g, ' | ') : null;""")
-        check("ticked third-level item shows under ghosts of both parents", ghost == "1 ticked item | P | P1 | P12", ghost)
+        check("ticked third-level item shows under ghosts of both parents", displayed().split("--\n")[-1] == "(P)\n→(P1)\n→→✓P12", displayed())
         click_checkbox("P2")
-        ghost = ob.js("""const s = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ticked-section');
-                         return s ? s.innerText.replace(/\\n+/g, ' | ') : null;""")
         check("ticked second-level item brings its sub-items into the ticked section",
-              ghost == "3 ticked items | P | P1 | P12 | P2 | P21", ghost)
+              displayed().split("--\n")[-1] == "(P)\n→(P1)\n→→✓P12\n→✓P2\n→→✓P21", displayed())
         check("…while the note keeps them all in place",
               body() == "- [ ] P\n→- [ ] P1\n→→- [ ] P11\n→→- [x] P12\n→- [x] P2\n→→- [x] P21\n- [ ] Q", body())
 
         open_note("untick under ticked", HEAD + "- [ ] Q\n- [x] A\n\t- [x] A1\n\t- [x] A2\n\t\t- [x] A21")
         click_checkbox("A21")
-        check("unticking a sub-item of a ticked item unticks the items it's under, and they move up",
-              body() == "- [ ] Q\n- [ ] A\n→- [ ] A2\n→→- [ ] A21\n→- [x] A1", body())
+        check("unticking a sub-item of a ticked item unticks the items it's under, which come back",
+              (displayed(), body()) == ("Q\nA\n→A2\n→→A21\n--\n(A)\n→✓A1", "- [ ] Q\n- [ ] A\n→- [x] A1\n→- [ ] A2\n→→- [ ] A21"), (displayed(), body()))
+
+        # Ticked items in the ticked section can be edited and deleted (the x), like Keep's.
+        open_note("ticked rows", HEAD + "- [ ] A\n- [x] Bread\n- [x] Pack\n\t- [x] Camera\n- [ ] C")
+        row = lambda label: f"[...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.fkm-ghost-child')].find(r => r.innerText.trim() === {json.dumps(label)})"
+        spot = ob.js(f"const r = {row('Bread')}.querySelector('.fkm-ghost-text').getBoundingClientRect(); return {{ x: r.right - 2, y: r.top + r.height / 2 }};")
+        ob.mouse("mouseMoved", spot["x"], spot["y"], 0)
+        x_shown = ob.js(f"return getComputedStyle({row('Bread')}.querySelector('.fkm-delete')).visibility;")
+        ob.mouse("mousePressed", spot["x"], spot["y"])
+        ob.mouse("mouseReleased", spot["x"], spot["y"], 0)
+        time.sleep(0.4)
+        ob.js(f"const t = {row('Bread')}.querySelector('.fkm-ghost-text'); const s = getSelection(); s.selectAllChildren(t); s.collapseToEnd(); return 1;")
+        ob.call("Input.insertText", text=" rolls")
+        time.sleep(0.6)
+        edited = ob.js(f"return {{ focused: document.activeElement === {row('Bread rolls')}?.querySelector('.fkm-ghost-text'), shown: {row('Bread rolls')}?.innerText.trim() ?? null }};")
+        check("a ticked item's text can be edited in the ticked section", body() == "- [ ] A\n- [x] Bread rolls\n- [x] Pack\n→- [x] Camera\n- [ ] C" and edited == {"focused": True, "shown": "Bread rolls"}, (body(), edited))
+        ob.js("document.activeElement?.blur(); return 1;")
+        ob.js(PRELUDE + f"{row('Pack')}.querySelector('.fkm-delete').click(); await wait(600);")
+        check("…and deleted with its x (shown on hover), its sub-items too", x_shown == "visible" and body() == "- [ ] A\n- [x] Bread rolls\n- [ ] C", (x_shown, body()))
 
         print("Drag and drop (real mouse events)")
         open_note("dragging", HEAD + "- [ ] P\n\t- [ ] P1\n\t- [ ] P2\n\t- [x] P3\n- [ ] Q\n\t- [ ] Q1\n- [ ] R")
@@ -531,14 +566,21 @@ def main():
         undo()
         check("…and Undo brings it back", text() == "- [ ] A\n- [ ] B\n\t- [ ] B1\n\t\tmore of B1\n- [ ] C\n", repr(text()))
 
-        # A ticked item with a Shift+Enter line: both lines struck through.
-        open_note("ticked lines", "- [ ] A\n- [x] Done\n\tmore of done\n")
+        # A ticked item with a Shift+Enter line: both lines struck through, in the ticked section
+        # and (with "Move ticked items down" off) in the list.
+        open_note("ticked lines section", "- [ ] A\n- [x] Done\n\tmore of done\n")
+        row = ob.js("""const r = window.__tcLeaf.view.editor.cm.contentDOM.querySelector('.fkm-ghost-child .fkm-ghost-text');
+            return r ? { text: r.innerText, deco: getComputedStyle(r).textDecorationLine } : null;""")
+        check("a ticked item's Shift+Enter lines show with it in the ticked section, struck through",
+              row == {"text": "Done\nmore of done", "deco": "line-through"}, row)
+        open_note("ticked lines", "- [ ] A\n- [x] Done\n\tmore of done\n", settings={"sinkTicked": False})
         deco = ob.js("""const ls = [...window.__tcLeaf.view.editor.cm.contentDOM.querySelectorAll('.cm-line')];
             const of = t => getComputedStyle(ls.find(l => l.textContent.includes(t))).textDecorationLine;
             const inner = t => { const l = ls.find(l => l.textContent.includes(t)); const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT); let n;
                 while ((n = w.nextNode())) if (n.textContent.includes(t)) return getComputedStyle(n.parentElement).textDecorationLine + '|' + of(t); };
             return { first: inner('Done'), extra: of('more of done') };""")
         check("a ticked item's Shift+Enter lines are struck through too", "line-through" in deco["extra"] and "line-through" in deco["first"], deco)
+        ob.js("const p = app.plugins.plugins['full-keep-mode']; p.settings.sinkTicked = true; p.refreshEditors(); return 1;")
 
         # The drop line while dragging: midway between the two items.
         open_note("drop line", "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D\n")
@@ -706,8 +748,8 @@ def main():
         check("all notes come in (Keep's trash is left out)", r["imported"] == 3 and r["skipped"] == 1, r)
         check("…and the import time is kept (for asking for a star a week later)", abs(imported["importedAt"] - time.time() * 1000) < 120000, imported["importedAt"])
         packing = imported["packing"].split("---\n")[-1]
-        check("checklists keep their order, sub-items and ticks (two levels, like Keep)",
-              packing == "- [ ] Parent\n\t- [ ] Child 1\n\t- [ ] Grandchild\n\t- [x] Child 2\n- [ ] Two lines\n\tsecond line\n- [x] Done\n", repr(packing))
+        check("checklists keep Keep's order (ticked items too), sub-items and ticks (two levels, like Keep)",
+              packing == "- [ ] Parent\n\t- [ ] Child 1\n\t- [ ] Grandchild\n\t- [x] Child 2\n- [x] Done\n- [ ] Two lines\n\tsecond line\n", repr(packing))
         fm = imported["packingFm"]
         check("the board order, pin, colour, labels and dates come along",
               fm.get("keep_order") == 300 and fm.get("keep_pinned") is True and fm.get("keep_color") == "cerulean"
@@ -927,7 +969,7 @@ def main():
             ob.js(PRELUDE + """const c = [...document.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card A.md'));
                 c.querySelector('.fkm-card-check').click(); await wait(1500);""")
             ticked = ob.js(PRELUDE + "return await app.vault.read(app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'));")
-            check("ticking on a card ticks the item and moves it down, like in the note", ticked.endswith("- [ ] Bread\n- [x] Milk\n- [x] Eggs\n"), repr(ticked))
+            check("ticking on a card ticks the item (in its place, like in the note)", ticked.endswith("- [x] Milk\n- [x] Eggs\n- [ ] Bread\n"), repr(ticked))
             check("…and doesn't open the note", modal_open() == 0)
 
             # Keep's exact colours, and the open note's top bar takes the colour too.
@@ -1010,6 +1052,18 @@ def main():
             escape_once()
             closed = where()
             check("…back returns to the note with the link, then to the board", (back, closed) == ({"popup": "Card B", "board": "bases"}, {"popup": None, "board": "bases"}), (back, closed))
+            # Ctrl+F in a pop-up: the search in its note (not in the board behind it).
+            ob.js(PRELUDE + """app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(300);
+                [...window.__fkmBoard.view.containerEl.querySelectorAll('.fkm-card')].find(c => c.dataset.path.endsWith('/Card B.md')).querySelector('.fkm-card-title').click();
+                await wait(1500); const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].pop(); m.leaf.view.editor.cm.focus(); await wait(300);""")
+            for kind in ("rawKeyDown", "keyUp"):
+                ob.call("Input.dispatchKeyEvent", type=kind, key="f", code="KeyF", windowsVirtualKeyCode=70, modifiers=2)
+            time.sleep(0.8)
+            search = ob.js("""const m = [...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].pop();
+                const box = m?.modalEl.querySelector('.document-search-container');
+                return { inPopup: !!box && getComputedStyle(box).display !== 'none', typing: !!box && box.contains(document.activeElement) };""")
+            check("Ctrl+F in a note's pop-up searches that note", search == {"inPopup": True, "typing": True}, search)
+            ob.js(PRELUDE + "[...(app.plugins.plugins['full-keep-mode'].openNotes ?? [])].forEach(n => n.closeForGood()); await wait(500);")
             ob.js(PRELUDE + "app.workspace.revealLeaf(window.__fkmBoard); app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true }); await wait(800);")
 
             # Ctrl+click (or a middle click) on a card, like in Keep's website: a new tab with
@@ -1152,6 +1206,16 @@ def main():
             check("searching finds notes by their text", card_order() == ["Card C"], (card_order(), ob.js("""const p = app.plugins.plugins['full-keep-mode']; return { text: p.boardFilter.text, n: p.boardFilter.matches?.size, input: window.__fkmBoard.view.containerEl.querySelector('.fkm-search input')?.value, inputs: document.querySelectorAll('.fkm-search input').length, boards: p.boards.size ?? p.boards.length, modals: document.querySelectorAll('.fkm-note-modal').length, leaves: app.workspace.getLeavesOfType('bases').map(l => l.view.file?.path) };""")))
             ob.js(PRELUDE + "window.__fkmBoard.view.containerEl.querySelector('.fkm-search-clear').click(); await wait(1500);")
             check("…and clearing the search shows all again", len(card_order()) == 3, card_order())
+            found = ob.js(PRELUDE + """await app.vault.create(FOLDER + '/Old zebra notes.md', '---\\nkeep_archived: true\\n---\\nA zebra once\\n'); await wait(800);
+                const input = window.__fkmBoard.view.containerEl.querySelector('.fkm-search input');
+                input.value = 'zebra'; input.dispatchEvent(new Event('input')); await wait(1500);
+                const el = window.__fkmBoard.view.containerEl;
+                const out = [...el.querySelectorAll('.fkm-board-section')].map(s => [s.querySelector('.fkm-board-section-title')?.textContent ?? null,
+                    ...[...s.querySelectorAll('.fkm-card')].map(c => c.dataset.path.split('/').pop().replace('.md', ''))]);
+                input.value = ''; input.dispatchEvent(new Event('input')); await wait(1200);
+                await app.vault.trash(app.vault.getAbstractFileByPath(FOLDER + '/Old zebra notes.md'), true); await wait(500);
+                return out;""")
+            check("a search shows the archived notes that match too, in a section of their own at the end", found == [["Others", "Card C"], ["Archive", "Old zebra notes"]], found)
             ob.js(PRELUDE + """const p = app.plugins.plugins['full-keep-mode'];
                 await p.setLabel(app.vault.getAbstractFileByPath(FOLDER + '/Card A.md'), 'Fruit', true); await wait(800);
                 app.workspace.setActiveLeaf(window.__fkmBoard, { focus: true });
@@ -1276,13 +1340,12 @@ def main():
         check("a due reminder pops up once, with a system notification", fired["first"] == 1 and fired["second"] == 1 and fired["shown"] == ["Reminder: archive"], fired)
 
         print("Command and header buttons")
-        open_note("command", HEAD + "- [x] A\n- [ ] B\n- [x] C\n- [ ] D")
-        ob.js(PRELUDE + "app.commands.executeCommandById('full-keep-mode:sort-ticked-items'); await wait(500);")
-        check("\"Move ticked items down in this note\" sorts an existing list", body() == "- [ ] B\n- [ ] D\n- [x] A\n- [x] C", body())
+        open_note("command", HEAD + "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D")
+        click_checkbox("C")
         labels = ob.js("return [...window.__tcLeaf.view.containerEl.querySelectorAll('.view-actions .clickable-icon')].map(b => b.getAttribute('aria-label'));")
         check("Undo and Redo buttons in the note's top bar", "Undo" in labels and "Redo" in labels, labels)
         ob.js(PRELUDE + "window.__tcLeaf.view.containerEl.querySelector('.fkm-undo-button').click(); await wait(400);")
-        check("the Undo button undoes", body() == "- [x] A\n- [ ] B\n- [x] C\n- [ ] D", body())
+        check("the Undo button undoes", body() == "- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D", body())
 
         print("Updating the plugin")
         menus = ob.js(PRELUDE + """for (let i = 0; i < 2; i++) {

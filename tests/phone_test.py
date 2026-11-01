@@ -327,12 +327,12 @@ def main():
             return js(CM + """const h = cm.state.selection.main.head; const line = cm.state.doc.lineAt(h);
                 return { line: line.text.trim(), column: h - line.from - (line.text.length - line.text.trimStart().length), focused: cm.hasFocus };""")
         own = tick_while_typing("Top two", 3, "Top two")
-        lt.check("ticking the item being typed in: the cursor goes along, typing goes on in its text",
-                 own == {"line": "- [x] TopX two", "column": 10, "focused": True}, (own, body()))
+        lt.check("ticking the item being typed in (it goes to the ticked section): typing goes on at the end of the item above",
+                 own == {"line": "- [ ] Sub twoX", "column": 14, "focused": True}, (own, body()))
         reset()
-        other = tick_while_typing("Sub two", 2, "Top one")
+        other = tick_while_typing("Top two", 2, "Top one")
         lt.check("ticking another item (with sub-items): the cursor stays in its item, typing goes on there",
-                 other == {"line": "- [x] SuXb two", "column": 9, "focused": True}, (other, body()))
+                 other == {"line": "- [ ] ToXp two", "column": 9, "focused": True}, (other, body()))
         reset()
 
         print("Swiping")
