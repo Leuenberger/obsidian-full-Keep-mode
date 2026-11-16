@@ -844,6 +844,20 @@ def main():
             let other = null; app.workspace.iterateRootLeaves(l => { other ??= l; });
             if (other) app.workspace.setActiveLeaf(other, { focus: false }); return 1;""")
 
+        # Renaming a note with a Keep title: a tidier name (only spaces or characters a name can't
+        # hold differ) keeps the title; a new name (other words) becomes the title.
+        renames = ob.js(PRELUDE + """
+            const f = await app.vault.create(FOLDER + '/Meeting 11 59 PM .md', '---\\nkeep_title: "Meeting 11:59 PM "\\n---\\ntext\\n');
+            await wait(800);
+            await app.fileManager.renameFile(f, FOLDER + '/Meeting 11 59 PM.md'); await wait(1200);
+            const tidy = app.metadataCache.getFileCache(f)?.frontmatter?.keep_title;
+            await app.fileManager.renameFile(f, FOLDER + '/Team lunch.md'); await wait(1200);
+            const other = app.metadataCache.getFileCache(f)?.frontmatter?.keep_title;
+            await app.vault.trash(f, true);
+            return { tidy, other };""")
+        check("renaming a note to a tidier name keeps its Keep title; a new name becomes the title",
+              renames == {"tidy": "Meeting 11:59 PM ", "other": "Team lunch"}, renames)
+
         # Imported notes look exactly like in Keep: Keep's plain text never turns into Markdown
         # (headings, lists, maths, code, tags...), and Keep's own formatting comes along.
         tricky = ["# not a heading", "> not a quote", "1. one", "1. one again", "- dash", "* star", "______",

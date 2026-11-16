@@ -1970,12 +1970,16 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 			setTimeout(() => this.renderButtons(), 300);
 		}));
 		// A note with a Keep title renamed elsewhere (file list, Obsidian's title): the title follows.
+		// Not when the new name is still the title's own file name - the same words, only spaces
+		// or characters a file name can't hold differ ("11:59" in the title, "11 59" in the
+		// name): a title has characters a name can't, and a name tidied up must not lose them.
 		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
 			if (!(file instanceof obsidian.TFile) || file.extension !== "md" || this.renamingForTitle === file.path) return;
 			const oldName = oldPath.split("/").pop().replace(/\.md$/, "");
 			if (oldName === file.basename) return; // only moved to another folder
 			const title = this.frontmatterOf(file)[TITLE_PROPERTY];
-			if (typeof title === "string") {
+			const words = text => String(text).normalize("NFC").replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+			if (typeof title === "string" && words(title) !== words(file.basename)) {
 				void this.app.fileManager.processFrontMatter(file, fm => {
 					fm[TITLE_PROPERTY] = file.basename;
 				});
