@@ -769,9 +769,80 @@ def main():
                 {{ path: 'Keep/pic.jpeg', name: 'pic.jpeg', text: async () => '', bytes: async () => new Uint8Array([255, 216, 255, 217]).buffer }}] }}, FOLDER + '/takeout');
             p.settings.importedAt = importedBefore; await p.saveSharedSettings(); await wait(800);
             const f = app.vault.getAbstractFileByPath(FOLDER + '/takeout/Old style.md');
-            return {{ imported: r.imported, files: r.files, missing: r.missingFiles, embeds: f ? (await app.vault.read(f)).includes('![[') : null }};""")
+            const embeds = f ? (await app.vault.read(f)).includes('![[') : null;
+            // The image went where the vault keeps attachments (maybe outside the test folder): it goes too.
+            for (const img of app.vault.getFiles().filter(x => /^pic( \\d+)?\\.jpe?g$/.test(x.name) && x.stat.size === 4)) await app.vault.trash(img, true);
+            return {{ imported: r.imported, files: r.files, missing: r.missingFiles, embeds }};""")
         check("Takeout: older exports too, and images Takeout names .jpeg where the note says .jpg",
               old == {"imported": 1, "files": 1, "missing": 0, "embeds": True}, old)
+
+        # Every imported note can be found by a link, whatever its Keep title: no spaces at the
+        # start or end of a name, nothing links read as their own syntax (# ^ | [ ]), accented
+        # letters stored one way, no two notes with names that only differ in those.
+        titles = [" Leading space", "Trailing space ", "C# notes", "[draft] plan", "a|b choice", "x^2 maths",
+                  "Same", "Same ", "L\u00f6sung", "Lo\u0308sung", "  "]
+        keep = [{"id": f"t{i}", "serverId": f"srvT{i}", "type": "note", "title": title, "text": "" if title.strip() else "  hello there",
+                 "items": [], "order": 100 - i, "color": "DEFAULT", "pinned": False, "archived": False, "trashed": False, "labels": [],
+                 "created": None, "edited": None, "links": [], "media": []} for i, title in enumerate(titles)]
+        keep.append({"id": "hub", "serverId": "srvHub", "type": "note", "title": "Hub", "order": 1,
+                     "text": "\n".join(f"https://keep.google.com/#NOTE/srvT{i}" for i in range(len(titles))),
+                     "items": [], "color": "DEFAULT", "pinned": False, "archived": False, "trashed": False, "labels": [],
+                     "created": None, "edited": None, "links": [], "media": []})
+        names = ob.js(PRELUDE + f"""
+            const p = app.plugins.plugins['full-keep-mode'];
+            const json = {json.dumps(json.dumps({"format": "full-keep-mode-export", "version": 1, "notes": keep}))};
+            const importedBefore = p.settings.importedAt;
+            await p.importKeep({{ files: [{{ path: 'keep-export/notes.json', name: 'notes.json', text: async () => json, bytes: async () => new ArrayBuffer(0) }}] }}, FOLDER + '/names');
+            p.settings.importedAt = importedBefore; await p.saveSharedSettings(); await wait(1500);
+            const files = app.vault.getMarkdownFiles().filter(f => f.path.startsWith(FOLDER + '/names/'));
+            const hub = files.find(f => f.basename === 'Hub');
+            return {{ names: files.map(f => f.basename).sort(),
+                reachable: files.every(f => app.metadataCache.getFirstLinkpathDest(f.basename, '') === f),
+                hubLinks: Object.keys(app.metadataCache.resolvedLinks[hub.path] ?? {{}}).length,
+                unresolved: Object.keys(app.metadataCache.unresolvedLinks[hub.path] ?? {{}}) }};""")
+        check("imported notes get names a link always finds (no spaces at the ends, no # ^ | [ ], one way to store an accent)",
+              names["names"] == sorted(["Leading space", "Trailing space", "C notes", "draft plan", "ab choice", "x2 maths",
+                                        "Same", "Same 2", "L\u00f6sung", "L\u00f6sung 2", "hello there", "Hub"]) and names["reachable"], names)
+        check("…and Keep's links between them all find their notes", names["hubLinks"] == len(titles) and names["unresolved"] == [], names)
+
+        # A note whose name a link can't find (a space at the end, from another importer): a
+        # click on a link to it opens it - Obsidian would create a new, empty note instead.
+        links = ob.js(PRELUDE + """
+            const mk = async (name, text) => { const path = FOLDER + '/' + name + '.md'; const f = app.vault.getAbstractFileByPath(path);
+                if (f) await app.vault.modify(f, text); else await app.vault.create(path, text); return path; };
+            await mk('Spaced note ', 'The real text');
+            await mk('Linker', 'See [[Spaced note ]] here.');
+            await wait(800);
+            const before = app.vault.getMarkdownFiles().length;
+            const opened = [];
+            for (const [link, leaf] of [['Spaced note ', false], ['Spaced note', false], ['spaced  NOTE', 'tab']]) {
+                await app.workspace.openLinkText(link, FOLDER + '/Linker.md', leaf); await wait(600);
+                opened.push(app.workspace.getActiveFile()?.path ?? null);
+            }
+            await app.workspace.openLinkText('A note that does not exist yet', FOLDER + '/Linker.md', false); await wait(600);
+            const made = app.vault.getAbstractFileByPath(FOLDER + '/A note that does not exist yet.md') ?? app.vault.getMarkdownFiles().find(f => f.basename === 'A note that does not exist yet');
+            const after = app.vault.getMarkdownFiles().length;
+            if (made) await app.vault.trash(made, true);
+            return { opened, extraNotes: after - before, newNote: !!made };""")
+        check("a link to a note whose name has a space at its end opens that note, never a new empty one",
+              links == {"opened": [f"{FOLDER}/Spaced note .md"] * 3, "extraNotes": 1, "newNote": True}, links)
+        clicked = ob.js(PRELUDE + """const leaf = app.workspace.getLeaf('tab');
+            await leaf.openFile(app.vault.getAbstractFileByPath(FOLDER + '/Linker.md'), { state: { mode: 'source', source: false } });
+            app.workspace.setActiveLeaf(leaf, { focus: true }); await wait(1200); window.__linkerLeaf = leaf;
+            const el = [...leaf.view.contentEl.querySelectorAll('.cm-hmd-internal-link')].find(e => e.textContent.includes('Spaced'));
+            if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + 5, y: r.top + r.height / 2 };""")
+        before = ob.js("return app.vault.getMarkdownFiles().length;")
+        if clicked:
+            ob.mouse("mouseMoved", clicked["x"], clicked["y"], 0)
+            ob.mouse("mousePressed", clicked["x"], clicked["y"])
+            ob.mouse("mouseReleased", clicked["x"], clicked["y"], 0)
+            time.sleep(1.2)
+        got = ob.js("return { file: app.workspace.getActiveFile()?.path ?? null, notes: app.vault.getMarkdownFiles().length };")
+        check("…also clicked in a note", clicked is not None and got == {"file": f"{FOLDER}/Spaced note .md", "notes": before}, (clicked, got, before))
+        # Close those tabs and put another one in front again (as closing a tab does).
+        ob.js("""app.workspace.getLeavesOfType('markdown').filter(l => l.view.file?.path?.includes('Spaced note') || l === window.__linkerLeaf).forEach(l => l.detach());
+            let other = null; app.workspace.iterateRootLeaves(l => { other ??= l; });
+            if (other) app.workspace.setActiveLeaf(other, { focus: false }); return 1;""")
 
         # Imported notes look exactly like in Keep: Keep's plain text never turns into Markdown
         # (headings, lists, maths, code, tags...), and Keep's own formatting comes along.

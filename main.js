@@ -1908,11 +1908,15 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		const openInPopup = function (linktext, sourcePath, newLeaf, state) {
 			const popup = [...(plugin.openNotes ?? [])].find(m => m.leaf?.view?.file?.path === sourcePath
 				&& !m.containerEl.hasClass("fkm-hidden") && m.containerEl.isConnected);
-			if (popup && !newLeaf) return popup.openLink(linktext, sourcePath, state);
-			const target = popup && plugin.app.metadataCache.getFirstLinkpathDest(obsidian.getLinkpath(linktext), sourcePath);
-			if (target instanceof obsidian.TFile && target.extension === "md") {
+			// A link to a note Obsidian can't find by its link (see noteForLink): that note, not a
+			// new empty one.
+			const meant = plugin.noteForLink(linktext, sourcePath);
+			if (popup && !newLeaf) return meant ? popup.openNote(meant) : popup.openLink(linktext, sourcePath, state);
+			const target = meant ?? (popup && plugin.app.metadataCache.getFirstLinkpathDest(obsidian.getLinkpath(linktext), sourcePath));
+			if (popup && target instanceof obsidian.TFile && target.extension === "md") {
 				return plugin.openOnNewBoard(target, newLeaf === true ? "tab" : newLeaf, popup.boardLeaf);
 			}
+			if (meant) return workspace.getLeaf(newLeaf).openFile(meant, state);
 			return openLinkText.apply(this, arguments);
 		};
 		workspace.openLinkText = openInPopup;
@@ -2337,8 +2341,11 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 	}
 
 	// The file name for a title: without the characters file names can't have.
+	// A file name a link can always find: no characters links or file systems use, no
+	// spaces at the start or end, accented letters stored one way (phones and computers would
+	// otherwise see two different names).
 	safeName(title) {
-		return title.replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim();
+		return title.normalize("NFC").replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim();
 	}
 
 	async setTitle(file, text) {
@@ -3762,6 +3769,37 @@ module.exports = class FullKeepModePlugin extends obsidian.Plugin {
 		new NoteModal(this, file, { isNew: true, initial: content, boardLeaf: this.activeBoardLeaf() }).open();
 	}
 
+	// ----- notes a link can't find -------------------------------------------------------------
+	// Obsidian finds a link's note by its name, ignoring spaces at the start and end of the
+	// link. A note whose file name starts or ends with a space (other Keep importers make
+	// such names from titles like "Budget 2024 "), or whose name differs from the link only
+	// in its spacing or in how an accented letter is stored (phones store "ö" differently),
+	// can't be found that way - and a click on the link makes Obsidian create a new, EMPTY
+	// note with the link's name: the note seems to have lost its text. A link that Obsidian
+	// can't resolve but that means one existing note opens that note.
+	static nameKey(name) {
+		return String(name).normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
+	}
+
+	noteForLink(linktext, sourcePath) {
+		const linkpath = obsidian.getLinkpath(String(linktext ?? ""));
+		if (!linkpath.trim() || this.app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath)) return null;
+		const name = linkpath.split("/").pop().replace(/\.md$/i, "");
+		const key = FullKeepModePlugin.nameKey(name);
+		const found = this.app.vault.getMarkdownFiles().filter(f => FullKeepModePlugin.nameKey(f.basename) === key);
+		if (!found.length) {
+			// A "#" or "^" in the note's name: Obsidian reads it as a heading or block of a note.
+			const whole = FullKeepModePlugin.nameKey(String(linktext).split("|")[0]);
+			const named = this.app.vault.getMarkdownFiles().filter(f => FullKeepModePlugin.nameKey(f.basename) === whole);
+			return named.length === 1 ? named[0] : null;
+		}
+		// Several: the one in the folder the link names, else next to the note with the link.
+		const folder = linkpath.includes("/") ? FullKeepModePlugin.nameKey(linkpath.slice(0, linkpath.lastIndexOf("/"))) : null;
+		const source = sourcePath?.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : "";
+		return found.find(f => folder !== null && FullKeepModePlugin.nameKey(f.parent?.path ?? "") === folder)
+			?? found.find(f => (f.parent?.path ?? "") === source) ?? found[0];
+	}
+
 	// Ctrl/Cmd+click on a card or on a link in a pop-up, like in Keep's website: the board in
 	// a new tab (or a split), with the note open over it.
 	async openOnNewBoard(file, where = "tab", boardLeaf = null) {
@@ -3998,6 +4036,14 @@ class NoteModal extends obsidian.Modal {
 
 	// A link in the note: the linked note opens right here, in the pop-up (Obsidian would
 	// open it in the tab behind the pop-up - the board's). Back returns to this note.
+	async openNote(file) {
+		if (this.isNew) await this.discardIfUntouched();
+		this.history.push(this.file);
+		await this.leaf.openFile(file, { state: { mode: "source" } });
+		forgetHistory(this.leaf);
+		this.showFile(this.leaf.view?.file);
+	}
+
 	async openLink(linktext, sourcePath, state) {
 		if (this.isNew) await this.discardIfUntouched();
 		this.history.push(this.file);
